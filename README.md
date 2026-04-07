@@ -125,9 +125,10 @@ GitHub Pages will serve `docs/index.html` as the site entry point. The AI data c
 ## Behavior
 
 - The first eligible tab activation each local day triggers the check-in reminder modal.
-- When the user confirms check-in, the extension stores the timestamp in `chrome.storage.local`.
+- The daily check-in modal includes an editable check-in time. If the user does not edit it, the extension stores the current click timestamp in `chrome.storage.local`; if the user edits it, the extension stores the manual local time.
 - If Chrome or the computer opens late and the stored check-in time is wrong, the user can correct today's check-in time in the setup popup.
 - When today's check-in time is corrected, FerbNotice recomputes the checkout due time, alarm, and action badge.
+- The setup popup can clear today's stored data, which resets today's check-in state and clears today's checkout alarm.
 - If the user checks in later than the configured latest on-time check-in threshold, the injected modal shows the late warning copy defined by `LATE_CHECKIN_MESSAGE` in `src/background.ts`.
 - After the configured work duration, the checkout time is rounded upward by the configured rounding slot. With the default 30-minute slot:
   - `09:00` stays `09:00`

@@ -42,6 +42,7 @@ interface NoticeShowCheckoutReminderMessage {
 
 interface NoticeCompleteCheckInMessage {
   type: "COMPLETE_CHECKIN";
+  checkInTime?: string;
 }
 
 interface NoticeAcknowledgeCheckoutReminderMessage {
@@ -63,6 +64,10 @@ interface NoticeUpdateTodayCheckInMessage {
   checkInTime: string;
 }
 
+interface NoticeClearTodayDataMessage {
+  type: "CLEAR_TODAY_DATA";
+}
+
 interface NoticeAcknowledgeCheckoutReminderResponse {
   success: boolean;
   error?: string;
@@ -76,6 +81,12 @@ interface NoticeSettingsResponse {
 }
 
 interface NoticeUpdateTodayCheckInResponse {
+  success: boolean;
+  today?: NoticeTodayStatus;
+  error?: string;
+}
+
+interface NoticeClearTodayDataResponse {
   success: boolean;
   today?: NoticeTodayStatus;
   error?: string;

@@ -50,12 +50,13 @@ This file documents the runtime data model for FerbNotice so another AI agent ca
 ## Message Flow
 
 - `SHOW_DAILY_CHECKIN_PROMPT`: background -> content
-- `COMPLETE_CHECKIN`: content -> background
+- `COMPLETE_CHECKIN`: content -> background. Optional payload: `{ "checkInTime": "09:30" }`. When omitted, the background uses the current click timestamp.
 - `SHOW_CHECKOUT_REMINDER`: background -> content
 - `ACKNOWLEDGE_CHECKOUT_REMINDER`: content -> background
 - `GET_SETTINGS`: setup popup -> background, returns persisted settings and today's derived status.
 - `UPDATE_SETTINGS`: setup popup -> background, saves setup settings.
 - `UPDATE_TODAY_CHECKIN`: setup popup -> background, overwrites today's `checkInAt`, recalculates `checkoutReminderDueAt`, resets the checkout reminder delivery marker when the due time changes, and refreshes the action badge/alarm.
+- `CLEAR_TODAY_DATA`: setup popup -> background, deletes today's record, clears today's checkout alarm, and refreshes the action badge.
 
 ## Implementation Pointers
 
@@ -96,10 +97,11 @@ The setup popup receives a derived `today` object from `GET_SETTINGS`, `UPDATE_S
 
 1. The user activates the first injectable Chrome tab of the day.
 2. The background service worker injects the content script and shows the daily check-in prompt.
-3. When the user confirms the check-in prompt, the background saves `checkInAt` and schedules a `chrome.alarms` reminder.
-4. If the saved check-in time is wrong, the user can open the extension action popup and edit today's check-in time. The background updates today's record and recomputes the checkout reminder.
-5. After the configured work duration, the result is rounded up to the configured slot, then the background tries to show the checkout reminder on the currently active tab.
-6. If the alarm fires while the active tab cannot receive the injected UI, the reminder stays pending until the next eligible tab activation.
+3. The daily check-in prompt shows the current local time as an editable check-in time. If the user does not edit it, the background uses the actual click timestamp. If the user edits it, the content script sends the manual `HH:mm` value through `COMPLETE_CHECKIN`.
+4. When the user confirms the check-in prompt, the background saves `checkInAt` and schedules a `chrome.alarms` reminder.
+5. If the saved check-in time is still wrong, the user can open the extension action popup and edit today's check-in time. The background updates today's record and recomputes the checkout reminder.
+6. After the configured work duration, the result is rounded up to the configured slot, then the background tries to show the checkout reminder on the currently active tab.
+7. If the alarm fires while the active tab cannot receive the injected UI, the reminder stays pending until the next eligible tab activation.
 
 ## Assumptions
 

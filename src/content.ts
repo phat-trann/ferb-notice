@@ -6,6 +6,9 @@ namespace NoticeCheckInContent {
     badge: HTMLSpanElement;
     title: HTMLHeadingElement;
     body: HTMLParagraphElement;
+    checkInTimeField: HTMLLabelElement;
+    checkInTimeInput: HTMLInputElement;
+    checkInTimeHint: HTMLSpanElement;
     meta: HTMLParagraphElement;
     credit: HTMLParagraphElement;
     primaryButton: HTMLButtonElement;
@@ -15,6 +18,7 @@ namespace NoticeCheckInContent {
 
   interface NoticeContentState {
     elements: NoticeContentElements | null;
+    isCheckInTimeEdited: boolean;
   }
 
   interface NoticeContentWindow extends Window {
@@ -33,7 +37,8 @@ function bootstrapContentScript(): void {
   extensionWindow[WINDOW_FLAG] = true;
 
   const state: NoticeContentState = {
-    elements: null
+    elements: null,
+    isCheckInTimeEdited: false
   };
 
   chrome.runtime.onMessage.addListener((message: unknown): void => {
@@ -59,7 +64,18 @@ function renderDailyCheckInPrompt(
   elements.badge.textContent = "CHECK IN";
   elements.title.textContent = "Bạn đã check in chưa?";
   elements.body.textContent =
-    "Lưu lại thời điểm bắt đầu làm việc để extension nhắc bạn checkout sau đúng 9 giờ.";
+    "Lưu lại thời điểm bắt đầu làm việc để extension nhắc bạn checkout đúng giờ";
+  state.isCheckInTimeEdited = false;
+  elements.checkInTimeField.hidden = false;
+  elements.checkInTimeInput.value = formatTimeInput(Date.now());
+  elements.checkInTimeInput.disabled = false;
+  elements.checkInTimeInput.oninput = (): void => {
+    state.isCheckInTimeEdited = true;
+  };
+  elements.checkInTimeInput.onchange = (): void => {
+    state.isCheckInTimeEdited = true;
+  };
+  elements.checkInTimeHint.textContent = "Chỉnh sửa nếu bạn đã bắt đầu làm việc từ trước đó.";
   elements.meta.textContent = `Ngày làm việc: ${message.dayKey}${lateMessage}`;
   elements.primaryButton.textContent = "Đã check in";
   elements.primaryButton.disabled = false;
@@ -87,6 +103,8 @@ function renderCheckoutReminder(
   elements.badge.textContent = "NHẮC CHECKOUT";
   elements.title.textContent = "Đã làm đủ giờ";
   elements.body.textContent = "Nhớ checkout trước khi ra về.";
+  elements.checkInTimeField.hidden = true;
+  elements.checkInTimeInput.disabled = true;
   elements.meta.textContent = `Check in lúc ${formatTime(message.checkInAt)} • Đủ 9 giờ lúc ${formatTime(
     message.dueAt
   )}.`;
@@ -109,13 +127,16 @@ async function handleCheckInConfirmation(state: NoticeContentState): Promise<voi
   elements.primaryButton.textContent = "Đang lưu...";
   elements.secondaryButton.disabled = true;
   elements.closeButton.disabled = true;
+  elements.checkInTimeInput.disabled = true;
 
   try {
+    const checkInTime: string | undefined = getManualCheckInTime(state, elements);
     const response: NoticeCompleteCheckInResponse = await sendRuntimeMessage<
       NoticeCompleteCheckInMessage,
       NoticeCompleteCheckInResponse
     >({
-      type: "COMPLETE_CHECKIN"
+      type: "COMPLETE_CHECKIN",
+      checkInTime
     });
 
     if (!response.success || typeof response.dueAt !== "number") {
@@ -128,9 +149,29 @@ async function handleCheckInConfirmation(state: NoticeContentState): Promise<voi
     elements.primaryButton.textContent = "Thử lại";
     elements.secondaryButton.disabled = false;
     elements.closeButton.disabled = false;
+    elements.checkInTimeInput.disabled = false;
     elements.meta.textContent =
       error instanceof Error ? error.message : "Unable to save your check-in.";
   }
+}
+
+function getManualCheckInTime(
+  state: NoticeContentState,
+  elements: NoticeContentElements
+): string | undefined {
+  if (!state.isCheckInTimeEdited) {
+    return undefined;
+  }
+
+  if (!elements.checkInTimeInput.value) {
+    return undefined;
+  }
+
+  if (!isTimeInput(elements.checkInTimeInput.value)) {
+    throw new Error("Giờ check-in không hợp lệ.");
+  }
+
+  return elements.checkInTimeInput.value;
 }
 
 function renderCheckInSuccess(state: NoticeContentState, dueAt: number, lateMessage?: string): void {
@@ -140,6 +181,8 @@ function renderCheckInSuccess(state: NoticeContentState, dueAt: number, lateMess
   elements.badge.textContent = "ĐÃ LƯU";
   elements.title.textContent = "Đã ghi nhận giờ check in";
   elements.body.textContent = `Mình sẽ nhắc bạn checkout lúc ${formatTime(dueAt)}.`;
+  elements.checkInTimeField.hidden = true;
+  elements.checkInTimeInput.disabled = true;
   elements.meta.textContent = lateMessage ?? "Bạn có thể đóng popup này.";
   elements.primaryButton.textContent = "Đóng";
   elements.primaryButton.disabled = false;
@@ -194,6 +237,9 @@ function createNoticeElements(state: NoticeContentState): NoticeContentElements 
   const badge: HTMLSpanElement = document.createElement("span");
   const title: HTMLHeadingElement = document.createElement("h2");
   const body: HTMLParagraphElement = document.createElement("p");
+  const checkInTimeField: HTMLLabelElement = document.createElement("label");
+  const checkInTimeInput: HTMLInputElement = document.createElement("input");
+  const checkInTimeHint: HTMLSpanElement = document.createElement("span");
   const meta: HTMLParagraphElement = document.createElement("p");
   const credit: HTMLParagraphElement = document.createElement("p");
   const actionRow: HTMLDivElement = document.createElement("div");
@@ -212,6 +258,11 @@ function createNoticeElements(state: NoticeContentState): NoticeContentElements 
   badge.className = "notice-badge";
   title.className = "notice-title";
   body.className = "notice-body";
+  checkInTimeField.className = "notice-time-field";
+  checkInTimeInput.className = "notice-time-input";
+  checkInTimeInput.type = "time";
+  checkInTimeInput.step = "60";
+  checkInTimeHint.className = "notice-time-hint";
   meta.className = "notice-meta";
   credit.className = "notice-credit";
   credit.textContent = "FerbNotice • Made by Ferb";
@@ -225,8 +276,9 @@ function createNoticeElements(state: NoticeContentState): NoticeContentElements 
     clearNotice(state);
   });
 
+  checkInTimeField.append("Giờ check-in", checkInTimeInput, checkInTimeHint);
   actionRow.append(secondaryButton, primaryButton);
-  panel.append(glow, closeButton, badge, title, body, meta, actionRow, credit);
+  panel.append(glow, closeButton, badge, title, body, checkInTimeField, meta, actionRow, credit);
   overlay.append(backdrop, panel);
   shadowRoot.append(styleElement, overlay);
   document.documentElement.appendChild(host);
@@ -236,6 +288,9 @@ function createNoticeElements(state: NoticeContentState): NoticeContentElements 
     badge,
     title,
     body,
+    checkInTimeField,
+    checkInTimeInput,
+    checkInTimeHint,
     meta,
     credit,
     primaryButton,
@@ -261,6 +316,7 @@ function clearNotice(state: NoticeContentState): void {
 
   state.elements.host.remove();
   state.elements = null;
+  state.isCheckInTimeEdited = false;
 }
 
 function getStyles(): string {
@@ -269,7 +325,7 @@ function getStyles(): string {
       position: fixed;
       inset: 0;
       z-index: 2147483647;
-      font-family: "Manrope", "Avenir Next", "Segoe UI", sans-serif;
+      font-family: "Noto Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
     }
 
     * {
@@ -384,6 +440,45 @@ function getStyles(): string {
       color: rgba(15, 23, 42, 0.65);
     }
 
+    .notice-time-field {
+      display: grid;
+      gap: 8px;
+      margin-top: 18px;
+      font-size: 13px;
+      font-weight: 800;
+      color: rgba(15, 23, 42, 0.72);
+    }
+
+    .notice-time-field[hidden] {
+      display: none;
+    }
+
+    .notice-time-input {
+      width: 100%;
+      height: 46px;
+      border: 1px solid rgba(148, 163, 184, 0.36);
+      border-radius: 16px;
+      padding: 0 14px;
+      color: #0f172a;
+      background: rgba(255, 255, 255, 0.82);
+      font: inherit;
+      font-size: 15px;
+      font-weight: 800;
+      outline: none;
+    }
+
+    .notice-time-input:focus {
+      border-color: #ea580c;
+      box-shadow: 0 0 0 4px rgba(234, 88, 12, 0.14);
+    }
+
+    .notice-time-hint {
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.45;
+      color: rgba(15, 23, 42, 0.58);
+    }
+
     .notice-actions {
       display: flex;
       gap: 12px;
@@ -474,6 +569,18 @@ function formatTime(timestamp: number): string {
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(timestamp));
+}
+
+function formatTimeInput(timestamp: number): string {
+  const date: Date = new Date(timestamp);
+  const hours: string = String(date.getHours()).padStart(2, "0");
+  const minutes: string = String(date.getMinutes()).padStart(2, "0");
+
+  return `${hours}:${minutes}`;
+}
+
+function isTimeInput(value: string): boolean {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
 async function sendRuntimeMessage<TRequest, TResponse>(message: TRequest): Promise<TResponse> {

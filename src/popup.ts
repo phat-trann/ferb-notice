@@ -7,6 +7,7 @@ namespace NoticeCheckInPopup {
   const todayCheckInTimeInput: HTMLInputElement = getElementById('today-checkin-time', HTMLInputElement);
   const todayCheckInNoteElement: HTMLParagraphElement = getElementById('today-checkin-note', HTMLParagraphElement);
   const saveButton: HTMLButtonElement = getElementById('save-button', HTMLButtonElement);
+  const clearTodayButton: HTMLButtonElement = getElementById('clear-today-button', HTMLButtonElement);
   const statusElement: HTMLParagraphElement = getElementById('status', HTMLParagraphElement);
 
   document.addEventListener('DOMContentLoaded', (): void => {
@@ -20,6 +21,10 @@ namespace NoticeCheckInPopup {
 
   enabledInput.addEventListener('change', (): void => {
     void saveEnabledSetting();
+  });
+
+  clearTodayButton.addEventListener('click', (): void => {
+    void clearTodayData();
   });
 
   async function loadSettings(): Promise<void> {
@@ -111,6 +116,27 @@ namespace NoticeCheckInPopup {
     }
   }
 
+  async function clearTodayData(): Promise<void> {
+    setFormBusy(true, 'Đang xóa data hôm nay...');
+
+    try {
+      const response: NoticeClearTodayDataResponse = await sendRuntimeMessage<NoticeClearTodayDataMessage, NoticeClearTodayDataResponse>({
+        type: 'CLEAR_TODAY_DATA',
+      });
+
+      if (!response.success) {
+        throw new Error(response.error ?? 'Không xóa được data hôm nay.');
+      }
+
+      renderToday(response.today);
+      setStatus('Đã xóa data hôm nay. Badge sẽ cập nhật ngay.');
+    } catch (error: unknown) {
+      setStatus(error instanceof Error ? error.message : 'Không xóa được data hôm nay.');
+    } finally {
+      setFormBusy(false);
+    }
+  }
+
   function renderSettings(settings: NoticeSettings): void {
     enabledInput.checked = settings.enabled;
     latestCheckInTimeInput.value = settings.latestCheckInTime;
@@ -153,6 +179,7 @@ namespace NoticeCheckInPopup {
     roundingSlotMinutesInput.disabled = isBusy;
     todayCheckInTimeInput.disabled = isBusy;
     saveButton.disabled = isBusy;
+    clearTodayButton.disabled = isBusy;
 
     if (status) {
       setStatus(status);

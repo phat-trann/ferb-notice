@@ -11,7 +11,7 @@
     :root {
       color: #13231e;
       background: #fff7ed;
-      font-family: "Avenir Next", "Manrope", "Segoe UI", sans-serif;
+      font-family: "Noto Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
       font-size: 16px;
       line-height: 1.5;
     }
@@ -347,6 +347,7 @@
             </path>
           </svg>
           GitHub</a>
+        <a href="https://github.com/phat-trann/ferb-notice/releases" rel="noreferrer" target="_blank">Releases</a>
         <a href="#features">Features</a>
         <a href="#build">Build</a>
         <a href="#install">Install</a>
@@ -363,6 +364,8 @@
           reminder exactly when your rounded work window is complete.
         </p>
         <div class="actions">
+          <a class="button primary" href="https://github.com/phat-trann/ferb-notice/releases" rel="noreferrer"
+            target="_blank">Download Release</a>
           <a class="button" href="https://github.com/phat-trann/ferb-notice" rel="noreferrer" target="_blank"
             style="display: flex; gap: 6px; align-items: center;">
             <svg aria-hidden="true" focusable="false" class="octicon octicon-mark-github" viewBox="0 0 24 24" width="25"
@@ -372,7 +375,7 @@
                 d="M10.226 17.284c-2.965-.36-5.054-2.493-5.054-5.256 0-1.123.404-2.336 1.078-3.144-.292-.741-.247-2.314.09-2.965.898-.112 2.111.36 2.83 1.01.853-.269 1.752-.404 2.853-.404 1.1 0 1.999.135 2.807.382.696-.629 1.932-1.1 2.83-.988.315.606.36 2.179.067 2.942.72.854 1.101 2 1.101 3.167 0 2.763-2.089 4.852-5.098 5.234.763.494 1.28 1.572 1.28 2.807v2.336c0 .674.561 1.056 1.235.786 4.066-1.55 7.255-5.615 7.255-10.646C23.5 6.188 18.334 1 11.978 1 5.62 1 .5 6.188.5 12.545c0 4.986 3.167 9.12 7.435 10.669.606.225 1.19-.18 1.19-.786V20.63a2.9 2.9 0 0 1-1.078.224c-1.483 0-2.359-.808-2.987-2.313-.247-.607-.517-.966-1.034-1.033-.27-.023-.359-.135-.359-.27 0-.27.45-.471.898-.471.652 0 1.213.404 1.797 1.235.45.651.921.943 1.483.943.561 0 .92-.202 1.437-.719.382-.381.674-.718.944-.943">
               </path>
             </svg>View on GitHub</a>
-          <a class="button primary" href="#build">Build Production</a>
+          <a class="button" href="#build">Build Production</a>
           <a class="button" href="#install">Load In Chrome</a>
         </div>
       </div>
@@ -411,7 +414,7 @@
       <div class="grid">
         <article class="card">
           <h3>Daily reminder</h3>
-          <p>The first eligible active tab of each local day triggers a check-in reminder modal.</p>
+          <p>The first eligible active tab of each local day triggers a check-in reminder modal with an editable check-in time.</p>
         </article>
         <article class="card">
           <h3>Configurable schedule</h3>
@@ -420,7 +423,7 @@
         </article>
         <article class="card">
           <h3>Manual correction</h3>
-          <p>If the browser opens late, correct today's recorded check-in time and FerbNotice recomputes the due time
+          <p>If the browser opens late, correct or clear today's recorded check-in data and FerbNotice recomputes the due time
             and badge state.</p>
         </article>
       </div>
@@ -441,27 +444,28 @@ npm run pack:production</code></pre>
 
     <section id="install" class="section">
       <p class="eyebrow">Chrome install</p>
-      <h2>Load the unpacked production build.</h2>
+      <h2>Download the release, then load it in Chrome.</h2>
       <div class="steps">
         <article class="step">
           <span class="step-number">1</span>
-          <h3>Open extensions</h3>
-          <p>Go to <code>chrome://extensions</code>.</p>
+          <h3>Open releases</h3>
+          <p>Go to <a href="https://github.com/phat-trann/ferb-notice/releases" rel="noreferrer"
+              target="_blank">GitHub Releases</a>.</p>
         </article>
         <article class="step">
           <span class="step-number">2</span>
-          <h3>Enable developer mode</h3>
-          <p>Turn on <code>Developer mode</code> in Chrome.</p>
+          <h3>Download package</h3>
+          <p>Download <code>ferbnotice-production.zip</code> from the latest release.</p>
         </article>
         <article class="step">
           <span class="step-number">3</span>
-          <h3>Load unpacked</h3>
-          <p>Select <code>Load unpacked</code> and choose <code>dist</code>.</p>
+          <h3>Unzip files</h3>
+          <p>Extract the zip file into a local folder.</p>
         </article>
         <article class="step">
           <span class="step-number">4</span>
-          <h3>Pin and setup</h3>
-          <p>Pin FerbNotice and click the icon to configure reminders.</p>
+          <h3>Load unpacked</h3>
+          <p>Open <code>chrome://extensions</code>, enable <code>Developer mode</code>, then choose the extracted folder.</p>
         </article>
       </div>
     </section>

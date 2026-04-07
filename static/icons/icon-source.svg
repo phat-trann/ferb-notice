@@ -18,5 +18,5 @@
   <path d="M208 308H284" stroke="#FFF7ED" stroke-width="36" stroke-linecap="round"/>
   <circle cx="332" cy="306" r="50" fill="#FB923C"/>
   <path d="M331.5 276V306L350 324.5" stroke="#FFF7ED" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
-  <text x="86" y="430" fill="#FFF7ED" font-size="84" font-weight="800" font-family="Avenir Next, Arial, sans-serif">F</text>
+  <text x="86" y="430" fill="#FFF7ED" font-size="84" font-weight="800" font-family="Noto Sans, Segoe UI, Arial, sans-serif">F</text>
 </svg>

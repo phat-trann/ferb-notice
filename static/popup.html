@@ -8,7 +8,7 @@
       :root {
         color: #102019;
         background: #fff7ed;
-        font-family: "Avenir Next", "Manrope", "Segoe UI", sans-serif;
+        font-family: "Noto Sans", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
       }
 
       * {
@@ -200,6 +200,18 @@
         cursor: default;
       }
 
+      .button-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
+
+      .danger-button {
+        color: #fff7ed;
+        background: linear-gradient(135deg, #b91c1c, #ef4444);
+        box-shadow: 0 18px 34px rgba(185, 28, 28, 0.24);
+      }
+
       .status {
         min-height: 18px;
         margin: 0;
@@ -254,7 +266,10 @@
           </label>
           <p id="today-checkin-note" class="note">Chưa có dữ liệu check-in hôm nay.</p>
 
-          <button id="save-button" type="submit">Lưu setup</button>
+          <div class="button-row">
+            <button id="save-button" type="submit">Lưu setup</button>
+            <button id="clear-today-button" class="danger-button" type="button">Xóa hôm nay</button>
+          </div>
           <p id="status" class="status" role="status"></p>
         </form>
       </section>

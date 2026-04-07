@@ -80,10 +80,10 @@ namespace NoticeCheckInBackground {
     });
   });
 
-  chrome.runtime.onMessage.addListener((message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response?: NoticeCompleteCheckInResponse | NoticeAcknowledgeCheckoutReminderResponse | NoticeSettingsResponse | NoticeUpdateTodayCheckInResponse) => void): boolean | void => {
+  chrome.runtime.onMessage.addListener((message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response?: NoticeCompleteCheckInResponse | NoticeAcknowledgeCheckoutReminderResponse | NoticeSettingsResponse | NoticeUpdateTodayCheckInResponse | NoticeClearTodayDataResponse) => void): boolean | void => {
     if (isCompleteCheckInMessage(message)) {
       void queueTask(async (): Promise<NoticeCompleteCheckInResponse> => {
-        return completeCheckIn();
+        return completeCheckIn(message.checkInTime);
       }).then(
         (response: NoticeCompleteCheckInResponse): void => {
           sendResponse(response);
@@ -156,6 +156,25 @@ namespace NoticeCheckInBackground {
           sendResponse({
             success: false,
             error: 'Unable to update today check-in time right now.',
+          });
+        }
+      );
+
+      return true;
+    }
+
+    if (isClearTodayDataMessage(message)) {
+      void queueTask(async (): Promise<NoticeClearTodayDataResponse> => {
+        return clearTodayData();
+      }).then(
+        (response: NoticeClearTodayDataResponse): void => {
+          sendResponse(response);
+        },
+        (error: unknown): void => {
+          console.error('Failed to clear today data', error);
+          sendResponse({
+            success: false,
+            error: 'Unable to clear today data right now.',
           });
         }
       );
@@ -320,19 +339,27 @@ namespace NoticeCheckInBackground {
     await refreshActionBadge();
   }
 
-  async function completeCheckIn(): Promise<NoticeCompleteCheckInResponse> {
+  async function completeCheckIn(checkInTime?: string): Promise<NoticeCompleteCheckInResponse> {
+    if (typeof checkInTime === 'string' && !isTimeInput(checkInTime)) {
+      return {
+        success: false,
+        error: 'Invalid check-in time.',
+      };
+    }
+
     const now: number = Date.now();
     const dayKey: string = getDayKey(now);
     const state: NoticeStorageState = await initializeState();
     const record: NoticeDailyRecord = state.records[dayKey] ?? { dayKey };
-    const isLate: boolean = isLateCheckInTime(now, state.settings);
+    const checkInAt: number = checkInTime ? getLocalTimeTimestamp(now, checkInTime) : now;
+    const isLate: boolean = isLateCheckInTime(checkInAt, state.settings);
     const checkoutReminderDueAt: number = roundCheckoutReminderTime(
-      now + minutesToMilliseconds(state.settings.workDurationMinutes),
+      checkInAt + minutesToMilliseconds(state.settings.workDurationMinutes),
       state.settings.roundingSlotMinutes
     );
 
     record.promptShownAt = record.promptShownAt ?? now;
-    record.checkInAt = now;
+    record.checkInAt = checkInAt;
     record.checkoutReminderDueAt = checkoutReminderDueAt;
     delete record.checkoutReminderShownAt;
 
@@ -428,6 +455,23 @@ namespace NoticeCheckInBackground {
     }
 
     ensureBadgeRefreshAlarm();
+    await refreshActionBadge();
+
+    return {
+      success: true,
+      today: getTodayStatus(state, now),
+    };
+  }
+
+  async function clearTodayData(): Promise<NoticeClearTodayDataResponse> {
+    const now: number = Date.now();
+    const dayKey: string = getDayKey(now);
+    const state: NoticeStorageState = await initializeState();
+
+    delete state.records[dayKey];
+
+    await saveStorageState(state);
+    await clearAlarm(getAlarmName(dayKey));
     await refreshActionBadge();
 
     return {
@@ -745,6 +789,10 @@ function withExtensionCredit(message: string): string {
 
   function isUpdateTodayCheckInMessage(message: unknown): message is NoticeUpdateTodayCheckInMessage {
     return isRecord(message) && message.type === 'UPDATE_TODAY_CHECKIN' && typeof message.checkInTime === 'string';
+  }
+
+  function isClearTodayDataMessage(message: unknown): message is NoticeClearTodayDataMessage {
+    return isRecord(message) && message.type === 'CLEAR_TODAY_DATA';
   }
 
   function isAcknowledgeCheckoutReminderMessage(message: unknown): message is NoticeAcknowledgeCheckoutReminderMessage {
