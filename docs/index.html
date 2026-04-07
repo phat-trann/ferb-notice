@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="FerbNotice is a Chrome MV3 extension that reminds you to check in and check out. Made by Ferb.">
+    <title>FerbNotice - Chrome Check-in Reminder</title>
+    <style>
+      :root {
+        color: #13231e;
+        background: #fff7ed;
+        font-family: "Avenir Next", "Manrope", "Segoe UI", sans-serif;
+        font-size: 16px;
+        line-height: 1.5;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: #13231e;
+        background:
+          radial-gradient(circle at 10% 8%, rgba(20, 184, 166, 0.28), transparent 28rem),
+          radial-gradient(circle at 90% 0%, rgba(251, 146, 60, 0.28), transparent 26rem),
+          linear-gradient(135deg, #fff7ed 0%, #fef3c7 46%, #d1fae5 100%);
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .page {
+        width: min(1120px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+
+      .nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 28px 0;
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 900;
+        letter-spacing: -0.04em;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 44px;
+        height: 44px;
+        place-items: center;
+        border-radius: 16px;
+        color: #fff7ed;
+        background: linear-gradient(135deg, #0f766e, #14b8a6);
+        box-shadow: 0 18px 36px rgba(15, 118, 110, 0.26);
+      }
+
+      .nav-links {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 10px;
+      }
+
+      .nav-links a,
+      .button {
+        border: 1px solid rgba(15, 23, 42, 0.12);
+        border-radius: 999px;
+        padding: 10px 15px;
+        background: rgba(255, 255, 255, 0.62);
+        font-size: 0.9rem;
+        font-weight: 800;
+        text-decoration: none;
+        box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+        gap: 28px;
+        align-items: center;
+        padding: 48px 0 76px;
+      }
+
+      .eyebrow {
+        margin: 0 0 14px;
+        color: #c2410c;
+        font-size: 0.78rem;
+        font-weight: 900;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        max-width: 800px;
+        margin-bottom: 20px;
+        font-size: clamp(3.2rem, 7vw, 6.7rem);
+        line-height: 0.86;
+        letter-spacing: -0.09em;
+      }
+
+      h2 {
+        margin-bottom: 18px;
+        font-size: clamp(2rem, 4vw, 3.8rem);
+        line-height: 0.96;
+        letter-spacing: -0.07em;
+      }
+
+      h3 {
+        margin-bottom: 8px;
+        font-size: 1.05rem;
+      }
+
+      .lead {
+        max-width: 680px;
+        margin-bottom: 28px;
+        color: rgba(15, 23, 42, 0.72);
+        font-size: clamp(1.05rem, 2vw, 1.32rem);
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 48px;
+        padding: 13px 18px;
+      }
+
+      .button.primary {
+        border-color: transparent;
+        color: #fff7ed;
+        background: linear-gradient(135deg, #0f766e, #14b8a6);
+      }
+
+      .product-card {
+        position: relative;
+        overflow: hidden;
+        border: 1px solid rgba(255, 255, 255, 0.74);
+        border-radius: 34px;
+        padding: 28px;
+        background: rgba(255, 255, 255, 0.74);
+        box-shadow:
+          0 32px 90px rgba(15, 23, 42, 0.2),
+          inset 0 1px 0 rgba(255, 255, 255, 0.82);
+      }
+
+      .product-card::after {
+        content: "";
+        position: absolute;
+        inset: auto -50px -80px auto;
+        width: 220px;
+        height: 220px;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(20, 184, 166, 0.34), transparent 70%);
+      }
+
+      .badge-row {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 24px;
+      }
+
+      .status-badge {
+        border-radius: 16px;
+        padding: 12px 8px;
+        color: #fff7ed;
+        font-size: 0.85rem;
+        font-weight: 900;
+        text-align: center;
+      }
+
+      .status-badge.off {
+        background: #64748b;
+      }
+
+      .status-badge.pending {
+        background: #dc2626;
+      }
+
+      .status-badge.countdown {
+        background: #f59e0b;
+      }
+
+      .status-badge.ready {
+        background: #16a34a;
+      }
+
+      .setup-panel {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        gap: 12px;
+        border-radius: 28px;
+        padding: 22px;
+        background: #fff7ed;
+      }
+
+      .setup-field {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 18px;
+        padding: 14px 16px;
+        background: rgba(255, 255, 255, 0.82);
+        font-weight: 800;
+      }
+
+      .setup-value {
+        color: #0f766e;
+      }
+
+      .section {
+        padding: 70px 0;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card,
+      .step {
+        border: 1px solid rgba(15, 23, 42, 0.08);
+        border-radius: 26px;
+        padding: 24px;
+        background: rgba(255, 255, 255, 0.68);
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.11);
+      }
+
+      .card p,
+      .step p {
+        margin-bottom: 0;
+        color: rgba(15, 23, 42, 0.68);
+      }
+
+      .steps {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .step-number {
+        display: grid;
+        width: 38px;
+        height: 38px;
+        margin-bottom: 18px;
+        place-items: center;
+        border-radius: 14px;
+        color: #fff7ed;
+        background: #0f766e;
+        font-weight: 900;
+      }
+
+      pre {
+        overflow: auto;
+        border: 1px solid rgba(15, 23, 42, 0.1);
+        border-radius: 24px;
+        padding: 22px;
+        background: #13231e;
+        color: #d1fae5;
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.16);
+      }
+
+      code {
+        font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", monospace;
+        font-size: 0.92rem;
+      }
+
+      .footer {
+        padding: 42px 0 56px;
+        color: rgba(15, 23, 42, 0.58);
+        font-weight: 800;
+      }
+
+      @media (max-width: 900px) {
+        .hero,
+        .grid,
+        .steps {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          padding-top: 20px;
+        }
+      }
+
+      @media (max-width: 620px) {
+        .nav {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .nav-links {
+          justify-content: flex-start;
+        }
+
+        .badge-row {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <nav class="nav" aria-label="Primary navigation">
+        <a class="brand" href="#top" aria-label="FerbNotice home">
+          <span class="brand-mark">F</span>
+          <span>FerbNotice</span>
+        </a>
+        <div class="nav-links">
+          <a href="#features">Features</a>
+          <a href="#build">Build</a>
+          <a href="#install">Install</a>
+          <a href="./ai-data-contract.md">AI Contract</a>
+        </div>
+      </nav>
+
+      <section id="top" class="hero">
+        <div>
+          <p class="eyebrow">Chrome MV3 extension</p>
+          <h1>Check in, work enough, check out.</h1>
+          <p class="lead">
+            FerbNotice reminds you to check in once per day, tracks your configured work duration, and shows the checkout reminder exactly when your rounded work window is complete.
+          </p>
+          <div class="actions">
+            <a class="button primary" href="#build">Build Production</a>
+            <a class="button" href="#install">Load In Chrome</a>
+          </div>
+        </div>
+
+        <aside class="product-card" aria-label="FerbNotice status preview">
+          <div class="badge-row">
+            <span class="status-badge off">OFF</span>
+            <span class="status-badge pending">IN?</span>
+            <span class="status-badge countdown">8h</span>
+            <span class="status-badge ready">OUT</span>
+          </div>
+          <div class="setup-panel">
+            <div class="setup-field">
+              <span>Latest check-in</span>
+              <span class="setup-value">10:00</span>
+            </div>
+            <div class="setup-field">
+              <span>Work duration</span>
+              <span class="setup-value">9h</span>
+            </div>
+            <div class="setup-field">
+              <span>Rounding slot</span>
+              <span class="setup-value">30m</span>
+            </div>
+            <div class="setup-field">
+              <span>Today check-in</span>
+              <span class="setup-value">09:30</span>
+            </div>
+          </div>
+        </aside>
+      </section>
+
+      <section id="features" class="section">
+        <p class="eyebrow">Why it exists</p>
+        <h2>A small extension for one daily workflow.</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>Daily reminder</h3>
+            <p>The first eligible active tab of each local day triggers a check-in reminder modal.</p>
+          </article>
+          <article class="card">
+            <h3>Configurable schedule</h3>
+            <p>Adjust the latest on-time check-in threshold, work duration, and checkout rounding slot from the setup popup.</p>
+          </article>
+          <article class="card">
+            <h3>Manual correction</h3>
+            <p>If the browser opens late, correct today's recorded check-in time and FerbNotice recomputes the due time and badge state.</p>
+          </article>
+        </div>
+      </section>
+
+      <section id="build" class="section">
+        <p class="eyebrow">Production build</p>
+        <h2>Create a release-ready extension package.</h2>
+        <pre><code>source ~/.nvm/nvm.sh
+nvm use node
+npm ci
+npm run pack:production</code></pre>
+        <p>
+          The production package is generated as <code>ferbnotice-production.zip</code>. The unpacked extension files are generated in <code>dist</code>.
+        </p>
+      </section>
+
+      <section id="install" class="section">
+        <p class="eyebrow">Chrome install</p>
+        <h2>Load the unpacked production build.</h2>
+        <div class="steps">
+          <article class="step">
+            <span class="step-number">1</span>
+            <h3>Open extensions</h3>
+            <p>Go to <code>chrome://extensions</code>.</p>
+          </article>
+          <article class="step">
+            <span class="step-number">2</span>
+            <h3>Enable developer mode</h3>
+            <p>Turn on <code>Developer mode</code> in Chrome.</p>
+          </article>
+          <article class="step">
+            <span class="step-number">3</span>
+            <h3>Load unpacked</h3>
+            <p>Select <code>Load unpacked</code> and choose <code>dist</code>.</p>
+          </article>
+          <article class="step">
+            <span class="step-number">4</span>
+            <h3>Pin and setup</h3>
+            <p>Pin FerbNotice and click the icon to configure reminders.</p>
+          </article>
+        </div>
+      </section>
+
+      <footer class="footer">
+        FerbNotice. Made by Ferb.
+      </footer>
+    </main>
+  </body>
+</html>

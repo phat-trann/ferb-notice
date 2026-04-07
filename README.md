@@ -98,6 +98,21 @@ The zip contains the generated extension files from `dist`, including:
 - `popup.html`
 - `icons/*`
 
+## GitHub Pages
+
+This repository includes a static landing page at `docs/index.html`.
+
+To publish it with GitHub Pages:
+
+1. Open the repository settings on GitHub.
+2. Go to `Pages`.
+3. Set `Source` to `Deploy from a branch`.
+4. Select the target branch.
+5. Select the `/docs` folder.
+6. Save the Pages configuration.
+
+GitHub Pages will serve `docs/index.html` as the site entry point. The AI data contract remains available as `docs/ai-data-contract.md`.
+
 ## Load The Production Build In Chrome
 
 1. Open `chrome://extensions`
@@ -145,6 +160,7 @@ See `docs/ai-data-contract.md` for the full storage schema, derived state, and r
 - `static/manifest.json`: Chrome MV3 manifest
 - `static/popup.html`: setup popup document and styles
 - `static/icons/*`: extension icon assets
+- `docs/index.html`: GitHub Pages landing page
 - `docs/ai-data-contract.md`: storage schema, message flow, and derived rules for future AI agents
 - `dist`: generated build output
 
@@ -154,6 +170,7 @@ See `docs/ai-data-contract.md` for the full storage schema, derived state, and r
 - Reminder scheduling, storage normalization, action badge state, and manual check-in correction are implemented in `src/background.ts`.
 - The tab-injected reminder UI is implemented in `src/content.ts`.
 - The extension action setup popup is implemented in `static/popup.html` and `src/popup.ts`.
+- The GitHub Pages landing page is implemented in `docs/index.html`.
 - Build output is generated into `dist`; do not edit `dist` directly unless intentionally patching built artifacts.
 
 ## Release Checklist
