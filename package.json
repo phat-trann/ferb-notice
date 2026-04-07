@@ -1,0 +1,17 @@
+{
+  "name": "ferbnotice-extension",
+  "version": "1.0.0",
+  "private": true,
+  "description": "FerbNotice Chrome extension. Made by Ferb.",
+  "engines": {
+    "node": ">=25.9.0"
+  },
+  "scripts": {
+    "build": "tsc && mkdir -p dist && cp -R static/. dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.29",
+    "typescript": "^5.9.3"
+  }
+}

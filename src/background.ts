@@ -1,0 +1,929 @@
+namespace NoticeCheckInBackground {
+  const STORAGE_KEY = 'noticeCheckInState';
+  const CHECKOUT_REMINDER_PREFIX = 'checkout-reminder';
+  const BADGE_REFRESH_ALARM = 'badge-refresh';
+  const EXTENSION_NAME = 'FerbNotice';
+  const EXTENSION_CREDIT = 'Made by Ferb';
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const RECORD_RETENTION_DAYS = 45;
+  const BADGE_REFRESH_PERIOD_MINUTES = 1;
+  const LATE_CHECKIN_MESSAGE = 'Trễ giờ check in T.T';
+  const DEFAULT_SETTINGS: NoticeSettings = {
+    enabled: true,
+    latestCheckInTime: '10:00',
+    workDurationMinutes: 9 * 60,
+    roundingSlotMinutes: 30,
+  };
+  const BADGE_TEXT_COLOR = '#ffffff';
+  const BADGE_DISABLED_COLOR = '#64748b';
+  const BADGE_PENDING_COLOR = '#dc2626';
+  const BADGE_COUNTDOWN_COLOR = '#f59e0b';
+  const BADGE_READY_COLOR = '#16a34a';
+
+  interface NoticeBadgeState {
+    text: string;
+    backgroundColor: string;
+    title: string;
+  }
+
+  let operationChain: Promise<unknown> = Promise.resolve();
+
+  chrome.runtime.onInstalled.addListener((): void => {
+    void queueTask(async (): Promise<void> => {
+      await initializeState();
+      ensureBadgeRefreshAlarm();
+      await refreshActionBadge();
+    });
+  });
+
+  chrome.runtime.onStartup.addListener((): void => {
+    void queueTask(async (): Promise<void> => {
+      await initializeState();
+      ensureBadgeRefreshAlarm();
+      await handleCurrentActiveTab();
+      await refreshActionBadge();
+    });
+  });
+
+  chrome.tabs.onActivated.addListener((activeInfo: chrome.tabs.OnActivatedInfo): void => {
+    void queueTask(async (): Promise<void> => {
+      await handleTabActivation(activeInfo.tabId);
+      await refreshActionBadge();
+    });
+  });
+
+  chrome.tabs.onUpdated.addListener((tabId: number, changeInfo: chrome.tabs.OnUpdatedInfo, tab: chrome.tabs.Tab): void => {
+    if (changeInfo.status !== 'complete' || tab.active !== true) {
+      return;
+    }
+
+    void queueTask(async (): Promise<void> => {
+      await handleTabActivation(tabId);
+      await refreshActionBadge();
+    });
+  });
+
+  chrome.windows.onFocusChanged.addListener((windowId: number): void => {
+    if (windowId === chrome.windows.WINDOW_ID_NONE) {
+      return;
+    }
+
+    void queueTask(async (): Promise<void> => {
+      await handleCurrentActiveTab();
+      await refreshActionBadge();
+    });
+  });
+
+  chrome.alarms.onAlarm.addListener((alarm: chrome.alarms.Alarm): void => {
+    void queueTask(async (): Promise<void> => {
+      await handleAlarm(alarm);
+    });
+  });
+
+  chrome.runtime.onMessage.addListener((message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response?: NoticeCompleteCheckInResponse | NoticeAcknowledgeCheckoutReminderResponse | NoticeSettingsResponse | NoticeUpdateTodayCheckInResponse) => void): boolean | void => {
+    if (isCompleteCheckInMessage(message)) {
+      void queueTask(async (): Promise<NoticeCompleteCheckInResponse> => {
+        return completeCheckIn();
+      }).then(
+        (response: NoticeCompleteCheckInResponse): void => {
+          sendResponse(response);
+        },
+        (error: unknown): void => {
+          console.error('Failed to save check-in', error);
+          sendResponse({
+            success: false,
+            error: 'Unable to save your check-in right now.',
+          });
+        }
+      );
+
+      return true;
+    }
+
+    if (isGetSettingsMessage(message)) {
+      void queueTask(async (): Promise<NoticeSettingsResponse> => {
+        const state: NoticeStorageState = await initializeState();
+
+        return {
+          success: true,
+          settings: state.settings,
+          today: getTodayStatus(state, Date.now()),
+        };
+      }).then(
+        (response: NoticeSettingsResponse): void => {
+          sendResponse(response);
+        },
+        (error: unknown): void => {
+          console.error('Failed to read settings', error);
+          sendResponse({
+            success: false,
+            error: 'Unable to read settings right now.',
+          });
+        }
+      );
+
+      return true;
+    }
+
+    if (isUpdateSettingsMessage(message)) {
+      void queueTask(async (): Promise<NoticeSettingsResponse> => {
+        return updateSettings(message.settings);
+      }).then(
+        (response: NoticeSettingsResponse): void => {
+          sendResponse(response);
+        },
+        (error: unknown): void => {
+          console.error('Failed to update settings', error);
+          sendResponse({
+            success: false,
+            error: 'Unable to update settings right now.',
+          });
+        }
+      );
+
+      return true;
+    }
+
+    if (isUpdateTodayCheckInMessage(message)) {
+      void queueTask(async (): Promise<NoticeUpdateTodayCheckInResponse> => {
+        return updateTodayCheckIn(message.checkInTime);
+      }).then(
+        (response: NoticeUpdateTodayCheckInResponse): void => {
+          sendResponse(response);
+        },
+        (error: unknown): void => {
+          console.error('Failed to update today check-in time', error);
+          sendResponse({
+            success: false,
+            error: 'Unable to update today check-in time right now.',
+          });
+        }
+      );
+
+      return true;
+    }
+
+    if (isAcknowledgeCheckoutReminderMessage(message)) {
+      void queueTask(async (): Promise<NoticeAcknowledgeCheckoutReminderResponse> => {
+        await acknowledgeCheckoutReminder(message.dayKey);
+
+        return {
+          success: true,
+        };
+      }).then(
+        (response: NoticeAcknowledgeCheckoutReminderResponse): void => {
+          sendResponse(response);
+        },
+        (error: unknown): void => {
+          console.error('Failed to acknowledge checkout reminder', error);
+          sendResponse({
+            success: false,
+            error: 'Unable to acknowledge checkout reminder right now.',
+          });
+        }
+      );
+
+      return true;
+    }
+  });
+
+  function queueTask<T>(task: () => Promise<T>): Promise<T> {
+    const scheduledTask: Promise<T> = operationChain.then(task, task);
+
+    operationChain = scheduledTask.then(
+      (): void => undefined,
+      (): void => undefined
+    );
+
+    return scheduledTask;
+  }
+
+  async function initializeState(): Promise<NoticeStorageState> {
+    const currentState: NoticeStorageState = await getStorageState();
+    const prunedState: { state: NoticeStorageState; changed: boolean } = pruneState(currentState, Date.now());
+
+    if (prunedState.changed) {
+      await saveStorageState(prunedState.state);
+    }
+
+    return prunedState.state;
+  }
+
+  async function handleCurrentActiveTab(): Promise<void> {
+    const activeTab: chrome.tabs.Tab | null = await getCurrentActiveTab();
+
+    if (!activeTab || typeof activeTab.id !== 'number') {
+      return;
+    }
+
+    await handleTabActivation(activeTab.id);
+  }
+
+  async function handleTabActivation(tabId: number): Promise<void> {
+    const tab: chrome.tabs.Tab | null = await getTab(tabId);
+
+    if (!tab || typeof tab.id !== 'number' || !isInjectableUrl(tab.url)) {
+      return;
+    }
+
+    const state: NoticeStorageState = await initializeState();
+
+    if (!state.settings.enabled) {
+      return;
+    }
+
+    const now: number = Date.now();
+    const pendingReminder: NoticeDailyRecord | null = getPendingCheckoutReminder(state, now);
+
+    if (pendingReminder) {
+      const reminderShown: boolean = await showCheckoutReminder(tab.id, pendingReminder);
+
+      if (reminderShown) {
+        pendingReminder.checkoutReminderShownAt = now;
+        state.records[pendingReminder.dayKey] = pendingReminder;
+        await saveStorageState(state);
+      }
+
+      return;
+    }
+
+    const activeWorkRecord: NoticeDailyRecord | null = getActiveWorkRecord(state, now);
+
+    if (activeWorkRecord) {
+      return;
+    }
+
+    const dayKey: string = getDayKey(now);
+    const todayRecord: NoticeDailyRecord | undefined = state.records[dayKey];
+
+    if (todayRecord?.checkInAt || todayRecord?.promptShownAt) {
+      return;
+    }
+
+    const promptShown: boolean = await showDailyCheckInPrompt(tab.id, dayKey, state.settings);
+
+    if (!promptShown) {
+      return;
+    }
+
+    state.records[dayKey] = {
+      dayKey,
+      promptShownAt: now,
+    };
+
+    await saveStorageState(state);
+  }
+
+  async function handleAlarm(alarm: chrome.alarms.Alarm): Promise<void> {
+    if (alarm.name === BADGE_REFRESH_ALARM) {
+      await refreshActionBadge();
+      return;
+    }
+
+    const dayKey: string | null = parseAlarmDayKey(alarm.name);
+
+    if (!dayKey) {
+      return;
+    }
+
+    const state: NoticeStorageState = await initializeState();
+
+    if (!state.settings.enabled) {
+      await refreshActionBadge();
+      return;
+    }
+
+    const record: NoticeDailyRecord | undefined = state.records[dayKey];
+
+    if (!record || !record.checkInAt || !record.checkoutReminderDueAt || record.checkoutReminderShownAt) {
+      await refreshActionBadge();
+      return;
+    }
+
+    const activeTab: chrome.tabs.Tab | null = await getCurrentActiveTab();
+
+    if (!activeTab || typeof activeTab.id !== 'number' || !isInjectableUrl(activeTab.url)) {
+      await refreshActionBadge();
+      return;
+    }
+
+    const reminderShown: boolean = await showCheckoutReminder(activeTab.id, record);
+
+    if (!reminderShown) {
+      await refreshActionBadge();
+      return;
+    }
+
+    record.checkoutReminderShownAt = Date.now();
+    state.records[dayKey] = record;
+    await saveStorageState(state);
+    await refreshActionBadge();
+  }
+
+  async function completeCheckIn(): Promise<NoticeCompleteCheckInResponse> {
+    const now: number = Date.now();
+    const dayKey: string = getDayKey(now);
+    const state: NoticeStorageState = await initializeState();
+    const record: NoticeDailyRecord = state.records[dayKey] ?? { dayKey };
+    const isLate: boolean = isLateCheckInTime(now, state.settings);
+    const checkoutReminderDueAt: number = roundCheckoutReminderTime(
+      now + minutesToMilliseconds(state.settings.workDurationMinutes),
+      state.settings.roundingSlotMinutes
+    );
+
+    record.promptShownAt = record.promptShownAt ?? now;
+    record.checkInAt = now;
+    record.checkoutReminderDueAt = checkoutReminderDueAt;
+    delete record.checkoutReminderShownAt;
+
+    state.records[dayKey] = record;
+
+    await saveStorageState(state);
+    await clearAlarm(getAlarmName(dayKey));
+
+    if (record.checkoutReminderDueAt > now) {
+      chrome.alarms.create(getAlarmName(dayKey), {
+        when: record.checkoutReminderDueAt,
+      });
+    }
+
+    ensureBadgeRefreshAlarm();
+    await refreshActionBadge();
+
+    return {
+      success: true,
+      dueAt: record.checkoutReminderDueAt,
+      isLate,
+      lateMessage: isLate ? LATE_CHECKIN_MESSAGE : undefined,
+    };
+  }
+
+  async function acknowledgeCheckoutReminder(dayKey: string): Promise<void> {
+    const state: NoticeStorageState = await initializeState();
+    const record: NoticeDailyRecord | undefined = state.records[dayKey];
+
+    if (record?.checkInAt && record.checkoutReminderDueAt && !record.checkoutReminderShownAt) {
+      record.checkoutReminderShownAt = Date.now();
+      state.records[dayKey] = record;
+      await saveStorageState(state);
+    }
+
+    await refreshActionBadge();
+  }
+
+  async function updateSettings(settingsPatch: Partial<NoticeSettings>): Promise<NoticeSettingsResponse> {
+    const state: NoticeStorageState = await initializeState();
+    const nextSettings: NoticeSettings = normalizeSettings({
+      ...state.settings,
+      ...settingsPatch,
+    });
+
+    state.settings = nextSettings;
+    await saveStorageState(state);
+    await refreshActionBadge();
+
+    return {
+      success: true,
+      settings: nextSettings,
+      today: getTodayStatus(state, Date.now()),
+    };
+  }
+
+  async function updateTodayCheckIn(checkInTime: string): Promise<NoticeUpdateTodayCheckInResponse> {
+    if (!isTimeInput(checkInTime)) {
+      return {
+        success: false,
+        error: 'Giờ check-in hôm nay không hợp lệ.',
+      };
+    }
+
+    const now: number = Date.now();
+    const dayKey: string = getDayKey(now);
+    const state: NoticeStorageState = await initializeState();
+    const record: NoticeDailyRecord = state.records[dayKey] ?? { dayKey };
+    const checkInAt: number = getLocalTimeTimestamp(now, checkInTime);
+    const checkoutReminderDueAt: number = roundCheckoutReminderTime(
+      checkInAt + minutesToMilliseconds(state.settings.workDurationMinutes),
+      state.settings.roundingSlotMinutes
+    );
+    const previousCheckoutReminderDueAt: number | undefined = record.checkoutReminderDueAt;
+
+    record.promptShownAt = record.promptShownAt ?? now;
+    record.checkInAt = checkInAt;
+    record.checkoutReminderDueAt = checkoutReminderDueAt;
+
+    if (previousCheckoutReminderDueAt !== checkoutReminderDueAt) {
+      delete record.checkoutReminderShownAt;
+    }
+
+    state.records[dayKey] = record;
+
+    await saveStorageState(state);
+    await clearAlarm(getAlarmName(dayKey));
+
+    if (record.checkoutReminderDueAt > now) {
+      chrome.alarms.create(getAlarmName(dayKey), {
+        when: record.checkoutReminderDueAt,
+      });
+    }
+
+    ensureBadgeRefreshAlarm();
+    await refreshActionBadge();
+
+    return {
+      success: true,
+      today: getTodayStatus(state, now),
+    };
+  }
+
+  function getPendingCheckoutReminder(state: NoticeStorageState, now: number): NoticeDailyRecord | null {
+    const pendingRecords: NoticeDailyRecord[] = Object.values(state.records)
+      .filter((record: NoticeDailyRecord): boolean => {
+        return Boolean(record.checkInAt && record.checkoutReminderDueAt && record.checkoutReminderDueAt <= now && !record.checkoutReminderShownAt);
+      })
+      .sort((leftRecord: NoticeDailyRecord, rightRecord: NoticeDailyRecord): number => {
+        return (leftRecord.checkoutReminderDueAt ?? 0) - (rightRecord.checkoutReminderDueAt ?? 0);
+      });
+
+    return pendingRecords[0] ?? null;
+  }
+
+  function getActiveWorkRecord(state: NoticeStorageState, now: number): NoticeDailyRecord | null {
+    const activeRecords: NoticeDailyRecord[] = Object.values(state.records)
+      .filter((record: NoticeDailyRecord): boolean => {
+        return Boolean(record.checkInAt && record.checkoutReminderDueAt && record.checkoutReminderDueAt > now);
+      })
+      .sort((leftRecord: NoticeDailyRecord, rightRecord: NoticeDailyRecord): number => {
+        return (rightRecord.checkInAt ?? 0) - (leftRecord.checkInAt ?? 0);
+      });
+
+    return activeRecords[0] ?? null;
+  }
+
+  function getTodayStatus(state: NoticeStorageState, now: number): NoticeTodayStatus {
+    const dayKey: string = getDayKey(now);
+    const record: NoticeDailyRecord | undefined = state.records[dayKey];
+
+    return {
+      dayKey,
+      hasCheckIn: Boolean(record?.checkInAt),
+      checkInTime: typeof record?.checkInAt === 'number' ? formatTimeInput(record.checkInAt) : undefined,
+      checkoutReminderDueTime: typeof record?.checkoutReminderDueAt === 'number' ? formatTimeInput(record.checkoutReminderDueAt) : undefined,
+    };
+  }
+
+  async function refreshActionBadge(): Promise<void> {
+    const state: NoticeStorageState = await initializeState();
+    const badgeState: NoticeBadgeState = getBadgeState(state, Date.now());
+
+    await Promise.all([chrome.action.setBadgeText({ text: badgeState.text }), chrome.action.setBadgeBackgroundColor({ color: badgeState.backgroundColor }), chrome.action.setBadgeTextColor({ color: BADGE_TEXT_COLOR }), chrome.action.setTitle({ title: badgeState.title })]);
+  }
+
+  function getBadgeState(state: NoticeStorageState, now: number): NoticeBadgeState {
+    if (!state.settings.enabled) {
+      return {
+        text: 'OFF',
+        backgroundColor: BADGE_DISABLED_COLOR,
+        title: withExtensionCredit('Reminder đang tắt. Bấm icon để bật lại.'),
+      };
+    }
+
+    const activeWorkRecord: NoticeDailyRecord | null = getActiveWorkRecord(state, now);
+
+    if (activeWorkRecord?.checkInAt && activeWorkRecord.checkoutReminderDueAt) {
+      const remainingMs: number = activeWorkRecord.checkoutReminderDueAt - now;
+
+      return {
+        text: formatBadgeCountdown(remainingMs),
+        backgroundColor: BADGE_COUNTDOWN_COLOR,
+        title: withExtensionCredit(`Check in: ${formatTime(activeWorkRecord.checkInAt)}.\nCòn ${formatDuration(remainingMs)}.\nĐủ giờ: ${formatTime(activeWorkRecord.checkoutReminderDueAt)}.`),
+      };
+    }
+
+    const todayRecord: NoticeDailyRecord | undefined = state.records[getDayKey(now)];
+
+    if (todayRecord?.checkInAt && todayRecord.checkoutReminderDueAt && todayRecord.checkoutReminderDueAt <= now) {
+      return {
+        text: 'OUT',
+        backgroundColor: BADGE_READY_COLOR,
+        title: withExtensionCredit(`Đã đủ 9 giờ.\nNhớ checkout trước khi ra về.\nCheck in: ${formatTime(todayRecord.checkInAt)}.\nĐủ giờ: ${formatTime(todayRecord.checkoutReminderDueAt)}.`),
+      };
+    }
+
+    const lateSuffix: string = isLateCheckInTime(now, state.settings) ? ` ${LATE_CHECKIN_MESSAGE}` : '';
+
+  return {
+    text: 'IN?',
+    backgroundColor: BADGE_PENDING_COLOR,
+    title: withExtensionCredit(`Chưa check in hôm nay.${lateSuffix}`),
+  };
+}
+
+  async function showDailyCheckInPrompt(tabId: number, dayKey: string, settings: NoticeSettings): Promise<boolean> {
+    const now: number = Date.now();
+    const isLate: boolean = isLateCheckInTime(now, settings);
+    const message: NoticeShowDailyCheckInPromptMessage = {
+      type: 'SHOW_DAILY_CHECKIN_PROMPT',
+      dayKey,
+      isLate,
+      lateMessage: isLate ? LATE_CHECKIN_MESSAGE : undefined,
+    };
+
+    return showNotice(tabId, message);
+  }
+
+  async function showCheckoutReminder(tabId: number, record: NoticeDailyRecord): Promise<boolean> {
+    if (!record.checkInAt || !record.checkoutReminderDueAt) {
+      return false;
+    }
+
+    const message: NoticeShowCheckoutReminderMessage = {
+      type: 'SHOW_CHECKOUT_REMINDER',
+      dayKey: record.dayKey,
+      checkInAt: record.checkInAt,
+      dueAt: record.checkoutReminderDueAt,
+    };
+
+    return showNotice(tabId, message);
+  }
+
+  async function showNotice(tabId: number, message: NoticeShowDailyCheckInPromptMessage | NoticeShowCheckoutReminderMessage): Promise<boolean> {
+    const scriptInjected: boolean = await injectContentScript(tabId);
+
+    if (!scriptInjected) {
+      return false;
+    }
+
+    return sendMessageToTab(tabId, message);
+  }
+
+  async function injectContentScript(tabId: number): Promise<boolean> {
+    return new Promise((resolve: (value: boolean) => void): void => {
+      chrome.scripting.executeScript(
+        {
+          target: { tabId },
+          files: ['content.js'],
+        },
+        (): void => {
+          if (chrome.runtime.lastError) {
+            resolve(false);
+            return;
+          }
+
+          resolve(true);
+        }
+      );
+    });
+  }
+
+  async function sendMessageToTab(tabId: number, message: NoticeShowDailyCheckInPromptMessage | NoticeShowCheckoutReminderMessage): Promise<boolean> {
+    return new Promise((resolve: (value: boolean) => void): void => {
+      chrome.tabs.sendMessage(tabId, message, (): void => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+
+        resolve(true);
+      });
+    });
+  }
+
+  function getAlarmName(dayKey: string): string {
+    return `${CHECKOUT_REMINDER_PREFIX}:${dayKey}`;
+  }
+
+  function parseAlarmDayKey(alarmName: string): string | null {
+    if (!alarmName.startsWith(`${CHECKOUT_REMINDER_PREFIX}:`)) {
+      return null;
+    }
+
+    const dayKey: string = alarmName.slice(CHECKOUT_REMINDER_PREFIX.length + 1);
+    return dayKey || null;
+  }
+
+  function pruneState(state: NoticeStorageState, now: number): { state: NoticeStorageState; changed: boolean } {
+    const cutoffDayKey: string = getDayKey(now - RECORD_RETENTION_DAYS * DAY_MS);
+    const nextRecords: Record<string, NoticeDailyRecord> = {};
+    let changed: boolean = false;
+
+    Object.entries(state.records).forEach(([dayKey, record]: [string, NoticeDailyRecord]): void => {
+      if (dayKey >= cutoffDayKey) {
+        nextRecords[dayKey] = record;
+        return;
+      }
+
+      changed = true;
+    });
+
+    return {
+      state: {
+        version: 1,
+        records: nextRecords,
+        settings: state.settings,
+      },
+      changed,
+    };
+  }
+
+  function getDayKey(timestamp: number): string {
+    const date: Date = new Date(timestamp);
+    const year: string = String(date.getFullYear());
+    const month: string = String(date.getMonth() + 1).padStart(2, '0');
+    const day: string = String(date.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+  }
+
+  function isLateCheckInTime(timestamp: number, settings: NoticeSettings): boolean {
+    return timestamp > getLocalTimeTimestamp(timestamp, settings.latestCheckInTime);
+  }
+
+  function getLocalTimeTimestamp(timestamp: number, time: string): number {
+    const date: Date = new Date(timestamp);
+    const [hours, minutes] = time.split(':').map((value: string): number => Number(value));
+
+    date.setHours(hours, minutes, 0, 0);
+    return date.getTime();
+  }
+
+  function roundCheckoutReminderTime(timestamp: number, roundingSlotMinutes: number): number {
+    const date: Date = new Date(timestamp);
+    const currentMinutes: number = date.getMinutes();
+    const currentSeconds: number = date.getSeconds();
+    const currentMilliseconds: number = date.getMilliseconds();
+    const remainderMinutes: number = currentMinutes % roundingSlotMinutes;
+    const isExactlyOnSlot: boolean = remainderMinutes === 0 && currentSeconds === 0 && currentMilliseconds === 0;
+
+    if (isExactlyOnSlot) {
+      return date.getTime();
+    }
+
+    if (remainderMinutes === 0) {
+      date.setMinutes(currentMinutes + roundingSlotMinutes, 0, 0);
+      return date.getTime();
+    }
+
+    date.setMinutes(currentMinutes + (roundingSlotMinutes - remainderMinutes), 0, 0);
+    return date.getTime();
+  }
+
+  function minutesToMilliseconds(minutes: number): number {
+    return minutes * 60 * 1000;
+  }
+
+  function formatBadgeCountdown(remainingMs: number): string {
+    const totalMinutes: number = Math.max(0, Math.ceil(remainingMs / (60 * 1000)));
+
+    if (totalMinutes >= 60) {
+      return `${Math.floor(totalMinutes / 60)}h`;
+    }
+
+    return `${totalMinutes}m`;
+  }
+
+  function formatDuration(remainingMs: number): string {
+    const totalMinutes: number = Math.max(0, Math.ceil(remainingMs / (60 * 1000)));
+    const hours: number = Math.floor(totalMinutes / 60);
+    const minutes: number = totalMinutes % 60;
+
+    if (hours === 0) {
+      return `${minutes} phút`;
+    }
+
+    if (minutes === 0) {
+      return `${hours} giờ`;
+    }
+
+    return `${hours} giờ ${minutes} phút`;
+  }
+
+  function formatTime(timestamp: number): string {
+    return new Intl.DateTimeFormat('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(timestamp));
+  }
+
+  function formatTimeInput(timestamp: number): string {
+    const date: Date = new Date(timestamp);
+    const hours: string = String(date.getHours()).padStart(2, '0');
+    const minutes: string = String(date.getMinutes()).padStart(2, '0');
+
+    return `${hours}:${minutes}`;
+  }
+
+function ensureBadgeRefreshAlarm(): void {
+  chrome.alarms.create(BADGE_REFRESH_ALARM, {
+    periodInMinutes: BADGE_REFRESH_PERIOD_MINUTES,
+  });
+}
+
+function withExtensionCredit(message: string): string {
+  return `${EXTENSION_NAME} • ${EXTENSION_CREDIT}\n${message}`;
+}
+
+  function isInjectableUrl(url: string | undefined): boolean {
+    if (!url) {
+      return false;
+    }
+
+    return url.startsWith('http://') || url.startsWith('https://') || url.startsWith('file://');
+  }
+
+  function isCompleteCheckInMessage(message: unknown): message is NoticeCompleteCheckInMessage {
+    return isRecord(message) && message.type === 'COMPLETE_CHECKIN';
+  }
+
+  function isGetSettingsMessage(message: unknown): message is NoticeGetSettingsMessage {
+    return isRecord(message) && message.type === 'GET_SETTINGS';
+  }
+
+  function isUpdateSettingsMessage(message: unknown): message is NoticeUpdateSettingsMessage {
+    return isRecord(message) && message.type === 'UPDATE_SETTINGS' && isRecord(message.settings);
+  }
+
+  function isUpdateTodayCheckInMessage(message: unknown): message is NoticeUpdateTodayCheckInMessage {
+    return isRecord(message) && message.type === 'UPDATE_TODAY_CHECKIN' && typeof message.checkInTime === 'string';
+  }
+
+  function isAcknowledgeCheckoutReminderMessage(message: unknown): message is NoticeAcknowledgeCheckoutReminderMessage {
+    return isRecord(message) && message.type === 'ACKNOWLEDGE_CHECKOUT_REMINDER' && typeof message.dayKey === 'string';
+  }
+
+  function isRecord(value: unknown): value is Record<string, unknown> {
+    return typeof value === 'object' && value !== null;
+  }
+
+  async function getStorageState(): Promise<NoticeStorageState> {
+    return new Promise((resolve: (value: NoticeStorageState) => void): void => {
+      chrome.storage.local.get(STORAGE_KEY, (items: Record<string, unknown>): void => {
+        if (chrome.runtime.lastError) {
+          console.error('Failed to read extension state', chrome.runtime.lastError);
+          resolve(createEmptyState());
+          return;
+        }
+
+        resolve(normalizeState(items[STORAGE_KEY]));
+      });
+    });
+  }
+
+  async function saveStorageState(state: NoticeStorageState): Promise<void> {
+    return new Promise((resolve: () => void, reject: (reason?: unknown) => void): void => {
+      chrome.storage.local.set(
+        {
+          [STORAGE_KEY]: state,
+        },
+        (): void => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+
+          resolve();
+        }
+      );
+    });
+  }
+
+  async function clearAlarm(alarmName: string): Promise<boolean> {
+    return new Promise((resolve: (value: boolean) => void): void => {
+      chrome.alarms.clear(alarmName, (wasCleared: boolean): void => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+
+        resolve(wasCleared);
+      });
+    });
+  }
+
+  async function getCurrentActiveTab(): Promise<chrome.tabs.Tab | null> {
+    const tabs: chrome.tabs.Tab[] = await queryTabs({
+      active: true,
+      lastFocusedWindow: true,
+    });
+
+    return tabs[0] ?? null;
+  }
+
+  async function queryTabs(queryInfo: chrome.tabs.QueryInfo): Promise<chrome.tabs.Tab[]> {
+    return new Promise((resolve: (value: chrome.tabs.Tab[]) => void): void => {
+      chrome.tabs.query(queryInfo, (tabs: chrome.tabs.Tab[]): void => {
+        if (chrome.runtime.lastError) {
+          resolve([]);
+          return;
+        }
+
+        resolve(tabs);
+      });
+    });
+  }
+
+  async function getTab(tabId: number): Promise<chrome.tabs.Tab | null> {
+    return new Promise((resolve: (value: chrome.tabs.Tab | null) => void): void => {
+      chrome.tabs.get(tabId, (tab: chrome.tabs.Tab): void => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
+
+        resolve(tab);
+      });
+    });
+  }
+
+  function createEmptyState(): NoticeStorageState {
+    return {
+      version: 1,
+      records: {},
+      settings: DEFAULT_SETTINGS,
+    };
+  }
+
+  function normalizeState(candidate: unknown): NoticeStorageState {
+    if (!isRecord(candidate) || candidate.version !== 1 || !isRecord(candidate.records)) {
+      return createEmptyState();
+    }
+
+    const records: Record<string, NoticeDailyRecord> = {};
+
+    Object.entries(candidate.records).forEach(([dayKey, value]: [string, unknown]): void => {
+      const normalizedRecord: NoticeDailyRecord | null = normalizeRecord(dayKey, value);
+
+      if (normalizedRecord) {
+        records[dayKey] = normalizedRecord;
+      }
+    });
+
+    return {
+      version: 1,
+      records,
+      settings: normalizeSettings(candidate.settings),
+    };
+  }
+
+  function normalizeSettings(candidate: unknown): NoticeSettings {
+    if (!isRecord(candidate)) {
+      return DEFAULT_SETTINGS;
+    }
+
+    return {
+      enabled: typeof candidate.enabled === 'boolean' ? candidate.enabled : DEFAULT_SETTINGS.enabled,
+      latestCheckInTime: normalizeTimeInput(candidate.latestCheckInTime),
+      workDurationMinutes: normalizeIntegerInput(candidate.workDurationMinutes, 30, 24 * 60, DEFAULT_SETTINGS.workDurationMinutes),
+      roundingSlotMinutes: normalizeIntegerInput(candidate.roundingSlotMinutes, 1, 120, DEFAULT_SETTINGS.roundingSlotMinutes),
+    };
+  }
+
+  function normalizeTimeInput(candidate: unknown): string {
+    if (isTimeInput(candidate)) {
+      return candidate;
+    }
+
+    return DEFAULT_SETTINGS.latestCheckInTime;
+  }
+
+  function isTimeInput(candidate: unknown): candidate is string {
+    return typeof candidate === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(candidate);
+  }
+
+  function normalizeIntegerInput(candidate: unknown, min: number, max: number, fallback: number): number {
+    if (typeof candidate !== 'number' || !Number.isFinite(candidate)) {
+      return fallback;
+    }
+
+    const normalizedValue: number = Math.round(candidate);
+    return Math.min(max, Math.max(min, normalizedValue));
+  }
+
+  function normalizeRecord(dayKey: string, candidate: unknown): NoticeDailyRecord | null {
+    if (!isRecord(candidate)) {
+      return null;
+    }
+
+    const record: NoticeDailyRecord = {
+      dayKey,
+    };
+
+    if (typeof candidate.promptShownAt === 'number') {
+      record.promptShownAt = candidate.promptShownAt;
+    }
+
+    if (typeof candidate.checkInAt === 'number') {
+      record.checkInAt = candidate.checkInAt;
+    }
+
+    if (typeof candidate.checkoutReminderDueAt === 'number') {
+      record.checkoutReminderDueAt = candidate.checkoutReminderDueAt;
+    }
+
+    if (typeof candidate.checkoutReminderShownAt === 'number') {
+      record.checkoutReminderShownAt = candidate.checkoutReminderShownAt;
+    }
+
+    return record;
+  }
+}
