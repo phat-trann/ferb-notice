@@ -18,6 +18,10 @@ namespace NoticeCheckInPopup {
     void saveSettings();
   });
 
+  enabledInput.addEventListener('change', (): void => {
+    void saveEnabledSetting();
+  });
+
   async function loadSettings(): Promise<void> {
     setFormBusy(true, 'Đang tải setup...');
 
@@ -76,6 +80,32 @@ namespace NoticeCheckInPopup {
       setStatus(todayCheckInTime ? 'Đã lưu setup và cập nhật giờ check-in hôm nay.' : 'Đã lưu setup. Badge sẽ cập nhật ngay.');
     } catch (error: unknown) {
       setStatus(error instanceof Error ? error.message : 'Không lưu được setup.');
+    } finally {
+      setFormBusy(false);
+    }
+  }
+
+  async function saveEnabledSetting(): Promise<void> {
+    setFormBusy(true, enabledInput.checked ? 'Đang bật FerbNotice...' : 'Đang tắt FerbNotice...');
+
+    try {
+      const response: NoticeSettingsResponse = await sendRuntimeMessage<NoticeUpdateSettingsMessage, NoticeSettingsResponse>({
+        type: 'UPDATE_SETTINGS',
+        settings: {
+          enabled: enabledInput.checked,
+        },
+      });
+
+      if (!response.success || !response.settings) {
+        throw new Error(response.error ?? 'Không cập nhật được trạng thái FerbNotice.');
+      }
+
+      renderSettings(response.settings);
+      renderToday(response.today);
+      setStatus(response.settings.enabled ? 'FerbNotice đã bật.' : 'FerbNotice đã tắt.');
+    } catch (error: unknown) {
+      setStatus(error instanceof Error ? error.message : 'Không cập nhật được trạng thái FerbNotice.');
+      await loadSettings();
     } finally {
       setFormBusy(false);
     }
