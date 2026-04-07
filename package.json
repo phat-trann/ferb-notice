@@ -8,6 +8,9 @@
   },
   "scripts": {
     "build": "tsc && mkdir -p dist && cp -R static/. dist",
+    "build:production": "npm run clean && npm run typecheck && npm run build",
+    "clean": "rm -rf dist ferbnotice-production.zip",
+    "pack:production": "npm run build:production && cd dist && zip -r ../ferbnotice-production.zip .",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
