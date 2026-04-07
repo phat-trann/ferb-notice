@@ -57,6 +57,14 @@ This file documents the runtime data model for FerbNotice so another AI agent ca
 - `UPDATE_SETTINGS`: setup popup -> background, saves setup settings.
 - `UPDATE_TODAY_CHECKIN`: setup popup -> background, overwrites today's `checkInAt`, recalculates `checkoutReminderDueAt`, resets the checkout reminder delivery marker when the due time changes, and refreshes the action badge/alarm.
 
+## Implementation Pointers
+
+- `src/background.ts` owns `chrome.storage.local`, `chrome.alarms`, badge state, tab activation handling, and runtime message handlers.
+- `src/content.ts` owns the injected check-in and checkout reminder modals shown inside eligible tabs.
+- `src/popup.ts` owns the extension action setup popup behavior.
+- `static/popup.html` owns the setup popup markup and styles.
+- `src/types.d.ts` owns shared message and storage contracts.
+
 ## Setup Today Status
 
 The setup popup receives a derived `today` object from `GET_SETTINGS`, `UPDATE_SETTINGS`, and `UPDATE_TODAY_CHECKIN`. This object is not persisted separately.
@@ -73,7 +81,7 @@ The setup popup receives a derived `today` object from `GET_SETTINGS`, `UPDATE_S
 ## Derived Rules
 
 - A check-in is considered late when the local system time is later than `settings.latestCheckInTime`.
-- The late warning message is `Trễ giờ check in T.T`.
+- Late warning copy is defined by `LATE_CHECKIN_MESSAGE` in `src/background.ts`.
 - Checkout due time is rounded up by this rule:
   - `09:00` stays `09:00`
   - `09:01` through `09:30` becomes `09:30`
@@ -88,8 +96,8 @@ The setup popup receives a derived `today` object from `GET_SETTINGS`, `UPDATE_S
 
 1. The user activates the first injectable Chrome tab of the day.
 2. The background service worker injects the content script and shows the daily check-in prompt.
-3. When the user clicks `Đã check in`, the background saves `checkInAt` and schedules a `chrome.alarms` reminder.
-4. If the saved check-in time is wrong, the user can open the extension action popup and edit `Giờ check-in hôm nay`; the background updates today's record and recomputes the checkout reminder.
+3. When the user confirms the check-in prompt, the background saves `checkInAt` and schedules a `chrome.alarms` reminder.
+4. If the saved check-in time is wrong, the user can open the extension action popup and edit today's check-in time. The background updates today's record and recomputes the checkout reminder.
 5. After the configured work duration, the result is rounded up to the configured slot, then the background tries to show the checkout reminder on the currently active tab.
 6. If the alarm fires while the active tab cannot receive the injected UI, the reminder stays pending until the next eligible tab activation.
 

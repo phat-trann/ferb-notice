@@ -1,11 +1,11 @@
 # FerbNotice
 
-Chrome extension nhắc check in ở lần active tab đầu tiên mỗi ngày và nhắc checkout sau đúng 9 giờ. Made by Ferb.
+FerbNotice is a Chrome MV3 extension that reminds the user to check in on the first eligible active tab of each local day, then reminds them to check out after the configured work duration. Made by Ferb.
 
 ## Requirements
 
 - `nvm`
-- Node mới nhất. Workspace này đã được chuyển sang `v25.9.0`.
+- Latest Node.js through `nvm`. This workspace has been tested with `v25.9.0`.
 
 ## Commands
 
@@ -13,36 +13,48 @@ Chrome extension nhắc check in ở lần active tab đầu tiên mỗi ngày v
 source ~/.nvm/nvm.sh
 nvm use node
 npm install
+npm run typecheck
 npm run build
 ```
 
 ## Load In Chrome
 
-1. Mở `chrome://extensions`
-2. Bật `Developer mode`
-3. Chọn `Load unpacked`
-4. Trỏ đến thư mục `dist`
+1. Open `chrome://extensions`
+2. Enable `Developer mode`
+3. Select `Load unpacked`
+4. Choose the `dist` directory
 
 ## Behavior
 
-- Bấm icon extension để mở setup: bật/tắt reminder, chỉnh giờ vào muộn nhất, duration làm việc, nấc làm tròn checkout, và giờ check-in hôm nay.
-- Mỗi ngày theo giờ hệ thống, lần đầu tiên bạn active vào một tab hợp lệ, extension sẽ hiện popup hỏi bạn đã check in chưa.
-- Khi bạn bấm `Đã check in`, extension lưu timestamp vào `chrome.storage.local`.
-- Nếu máy mở chậm hoặc check-in thực tế lệch so với giờ lưu, vào setup và chỉnh `Giờ check-in hôm nay`; extension sẽ tính lại mốc checkout, alarm, và badge.
-- Nếu check in sau giờ vào muộn nhất trong setup, popup sẽ hiện thêm câu: `Trễ giờ check in T.T`.
-- Sau `9h` làm việc, giờ checkout sẽ được làm tròn:
+- Clicking the extension icon opens the setup popup. The setup popup can enable or disable reminders, edit the latest on-time check-in threshold, edit the required work duration, edit the checkout rounding slot, and correct today's recorded check-in time.
+- Each local day, the first time the user activates an eligible Chrome tab, the extension injects a modal asking whether the user has checked in.
+- When the user confirms check-in, the extension stores the timestamp in `chrome.storage.local`.
+- If Chrome or the computer opens late and the stored check-in time is wrong, the user can correct today's check-in time in the setup popup. The extension then recomputes the checkout due time, alarm, and action badge.
+- If the user checks in later than the configured latest on-time check-in threshold, the injected modal shows the late warning copy defined by `LATE_CHECKIN_MESSAGE` in `src/background.ts`.
+- After the configured work duration, the checkout time is rounded upward by the configured slot. With the default 30-minute slot:
   - `09:01` -> `09:30`
   - `09:31` -> `10:00`
-- Extension sẽ hiện popup nhắc `Nhớ checkout trước khi ra về` theo mốc đã làm tròn đó.
-- Badge trên icon extension sẽ hiện:
-  - `IN?` màu đỏ khi chưa check in
-  - countdown khi đang trong 9 giờ làm việc
-  - `OUT` màu xanh khi đã đủ giờ checkout
+- The extension shows the checkout reminder modal at the rounded due time.
+- The action badge shows:
+  - `OFF` with a gray badge when reminders are disabled
+  - `IN?` with a red badge when today's check-in is still missing
+  - a countdown such as `8h` or `42m` with an amber badge while the work window is still running
+  - `OUT` with a green badge when today's configured work duration is complete
 
 ## Project Structure
 
-- `src/background.ts`: service worker quản lý state, alarm, và logic tab activation
-- `src/content.ts`: UI popup inject vào tab hiện tại
+- `src/background.ts`: service worker that manages state, alarms, tab activation, and badge state
+- `src/content.ts`: injected modal UI for check-in and checkout reminders
+- `src/popup.ts`: setup popup controller for settings and manual check-in correction
 - `src/types.d.ts`: shared runtime contracts
 - `static/manifest.json`: manifest MV3
-- `docs/ai-data-contract.md`: schema dữ liệu và message flow để AI khác đọc được
+- `static/popup.html`: setup popup document and styles
+- `docs/ai-data-contract.md`: storage schema, message flow, and derived rules for future AI agents
+
+## AI Agent Notes
+
+- Start with `docs/ai-data-contract.md` to understand persisted state, derived state, and message contracts.
+- Reminder scheduling, storage normalization, action badge state, and manual check-in correction are implemented in `src/background.ts`.
+- The tab-injected reminder UI is implemented in `src/content.ts`.
+- The extension action setup popup is implemented in `static/popup.html` and `src/popup.ts`.
+- Build output is generated into `dist`; do not edit `dist` directly unless intentionally patching built artifacts.
