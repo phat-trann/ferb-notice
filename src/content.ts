@@ -19,6 +19,7 @@ namespace NoticeCheckInContent {
   interface NoticeContentState {
     elements: NoticeContentElements | null;
     isCheckInTimeEdited: boolean;
+    currentNoticeKind: "checkin" | "checkout" | "success" | null;
   }
 
   interface NoticeContentWindow extends Window {
@@ -38,7 +39,8 @@ function bootstrapContentScript(): void {
 
   const state: NoticeContentState = {
     elements: null,
-    isCheckInTimeEdited: false
+    isCheckInTimeEdited: false,
+    currentNoticeKind: null
   };
 
   chrome.runtime.onMessage.addListener((message: unknown): void => {
@@ -57,9 +59,10 @@ function renderDailyCheckInPrompt(
   state: NoticeContentState,
   message: NoticeShowDailyCheckInPromptMessage
 ): void {
-  const elements: NoticeContentElements = ensureNoticeElements(state);
+  const elements: NoticeContentElements = replaceNoticeElements(state);
   const lateMessage: string = message.isLate ? ` • ${message.lateMessage ?? ""}` : "";
 
+  state.currentNoticeKind = "checkin";
   applyNoticeVariant(elements, "checkin");
   elements.badge.textContent = "CHECK IN";
   elements.title.textContent = "Bạn đã check in chưa?";
@@ -86,10 +89,10 @@ function renderDailyCheckInPrompt(
     void handleCheckInConfirmation(state);
   };
   elements.secondaryButton.onclick = (): void => {
-    clearNotice(state);
+    void snoozeDailyCheckInPrompt(state);
   };
   elements.closeButton.onclick = (): void => {
-    clearNotice(state);
+    void snoozeDailyCheckInPrompt(state);
   };
 }
 
@@ -97,8 +100,9 @@ function renderCheckoutReminder(
   state: NoticeContentState,
   message: NoticeShowCheckoutReminderMessage
 ): void {
-  const elements: NoticeContentElements = ensureNoticeElements(state);
+  const elements: NoticeContentElements = replaceNoticeElements(state);
 
+  state.currentNoticeKind = "checkout";
   applyNoticeVariant(elements, "checkout");
   elements.badge.textContent = "NHẮC CHECKOUT";
   elements.title.textContent = "Đã làm đủ giờ";
@@ -177,6 +181,7 @@ function getManualCheckInTime(
 function renderCheckInSuccess(state: NoticeContentState, dueAt: number, lateMessage?: string): void {
   const elements: NoticeContentElements = ensureNoticeElements(state);
 
+  state.currentNoticeKind = "success";
   applyNoticeVariant(elements, "success");
   elements.badge.textContent = "ĐÃ LƯU";
   elements.title.textContent = "Đã ghi nhận giờ check in";
@@ -216,11 +221,32 @@ async function acknowledgeCheckoutReminder(
   }
 }
 
+async function snoozeDailyCheckInPrompt(state: NoticeContentState): Promise<void> {
+  try {
+    await sendRuntimeMessage<
+      NoticeSnoozeDailyCheckInPromptMessage,
+      NoticeSnoozeDailyCheckInPromptResponse
+    >({
+      type: "SNOOZE_DAILY_CHECKIN_PROMPT"
+    });
+  } catch (error: unknown) {
+    console.error("Failed to snooze daily check-in prompt", error);
+  } finally {
+    clearNotice(state);
+  }
+}
+
 function ensureNoticeElements(state: NoticeContentState): NoticeContentElements {
   if (state.elements) {
     return state.elements;
   }
 
+  state.elements = createNoticeElements(state);
+  return state.elements;
+}
+
+function replaceNoticeElements(state: NoticeContentState): NoticeContentElements {
+  clearNotice(state);
   state.elements = createNoticeElements(state);
   return state.elements;
 }
@@ -273,7 +299,7 @@ function createNoticeElements(state: NoticeContentState): NoticeContentElements 
   primaryButton.type = "button";
 
   backdrop.addEventListener("click", (): void => {
-    clearNotice(state);
+    void handleBackdropDismiss(state);
   });
 
   checkInTimeField.append("Giờ check-in", checkInTimeInput, checkInTimeHint);
@@ -317,6 +343,16 @@ function clearNotice(state: NoticeContentState): void {
   state.elements.host.remove();
   state.elements = null;
   state.isCheckInTimeEdited = false;
+  state.currentNoticeKind = null;
+}
+
+async function handleBackdropDismiss(state: NoticeContentState): Promise<void> {
+  if (state.currentNoticeKind === "checkin") {
+    await snoozeDailyCheckInPrompt(state);
+    return;
+  }
+
+  clearNotice(state);
 }
 
 function getStyles(): string {

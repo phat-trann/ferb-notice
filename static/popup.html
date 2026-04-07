@@ -58,6 +58,20 @@
         gap: 12px;
       }
 
+      .brand-copy {
+        display: grid;
+        grid-template-columns: 42px 1fr;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand-logo {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        box-shadow: 0 14px 30px rgba(15, 118, 110, 0.2);
+      }
+
       .eyebrow {
         margin: 0 0 8px;
         font-size: 11px;
@@ -225,10 +239,13 @@
     <main class="shell">
       <section class="panel" aria-label="FerbNotice setup">
         <div class="brand">
-          <div>
-            <p class="eyebrow">Setup</p>
-            <h1>FerbNotice</h1>
-            <p class="credit">Made by Ferb</p>
+          <div class="brand-copy">
+            <img class="brand-logo" src="icons/icon-128.png" width="42" height="42" alt="" aria-hidden="true">
+            <div>
+              <p class="eyebrow">Setup</p>
+              <h1>FerbNotice</h1>
+              <p class="credit">Made by Ferb</p>
+            </div>
           </div>
           <label class="switch" title="Bật hoặc tắt FerbNotice">
             <input id="enabled" type="checkbox">

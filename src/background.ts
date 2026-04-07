@@ -1,5 +1,6 @@
 namespace NoticeCheckInBackground {
   const STORAGE_KEY = 'noticeCheckInState';
+  const CHECK_IN_PROMPT_SNOOZE_STORAGE_KEY = 'noticeCheckInPromptSnoozedTabs';
   const CHECKOUT_REMINDER_PREFIX = 'checkout-reminder';
   const BADGE_REFRESH_ALARM = 'badge-refresh';
   const EXTENSION_NAME = 'FerbNotice';
@@ -7,6 +8,7 @@ namespace NoticeCheckInBackground {
   const DAY_MS = 24 * 60 * 60 * 1000;
   const RECORD_RETENTION_DAYS = 45;
   const BADGE_REFRESH_PERIOD_MINUTES = 1;
+  const CHECK_IN_PROMPT_SNOOZE_MS = 60 * 60 * 1000;
   const LATE_CHECKIN_MESSAGE = 'Trễ giờ check in T.T';
   const DEFAULT_SETTINGS: NoticeSettings = {
     enabled: true,
@@ -63,6 +65,12 @@ namespace NoticeCheckInBackground {
     });
   });
 
+  chrome.tabs.onRemoved.addListener((tabId: number): void => {
+    void queueTask(async (): Promise<void> => {
+      await removeSnoozedCheckInPromptTab(tabId);
+    });
+  });
+
   chrome.windows.onFocusChanged.addListener((windowId: number): void => {
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
       return;
@@ -80,7 +88,7 @@ namespace NoticeCheckInBackground {
     });
   });
 
-  chrome.runtime.onMessage.addListener((message: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (response?: NoticeCompleteCheckInResponse | NoticeAcknowledgeCheckoutReminderResponse | NoticeSettingsResponse | NoticeUpdateTodayCheckInResponse | NoticeClearTodayDataResponse) => void): boolean | void => {
+  chrome.runtime.onMessage.addListener((message: unknown, sender: chrome.runtime.MessageSender, sendResponse: (response?: NoticeCompleteCheckInResponse | NoticeAcknowledgeCheckoutReminderResponse | NoticeSettingsResponse | NoticeUpdateTodayCheckInResponse | NoticeClearTodayDataResponse | NoticeSnoozeDailyCheckInPromptResponse) => void): boolean | void => {
     if (isCompleteCheckInMessage(message)) {
       void queueTask(async (): Promise<NoticeCompleteCheckInResponse> => {
         return completeCheckIn(message.checkInTime);
@@ -182,6 +190,25 @@ namespace NoticeCheckInBackground {
       return true;
     }
 
+    if (isSnoozeDailyCheckInPromptMessage(message)) {
+      void queueTask(async (): Promise<NoticeSnoozeDailyCheckInPromptResponse> => {
+        return snoozeDailyCheckInPrompt(sender);
+      }).then(
+        (response: NoticeSnoozeDailyCheckInPromptResponse): void => {
+          sendResponse(response);
+        },
+        (error: unknown): void => {
+          console.error('Failed to snooze daily check-in prompt', error);
+          sendResponse({
+            success: false,
+            error: 'Unable to snooze the check-in prompt right now.',
+          });
+        }
+      );
+
+      return true;
+    }
+
     if (isAcknowledgeCheckoutReminderMessage(message)) {
       void queueTask(async (): Promise<NoticeAcknowledgeCheckoutReminderResponse> => {
         await acknowledgeCheckoutReminder(message.dayKey);
@@ -275,7 +302,11 @@ namespace NoticeCheckInBackground {
     const dayKey: string = getDayKey(now);
     const todayRecord: NoticeDailyRecord | undefined = state.records[dayKey];
 
-    if (todayRecord?.checkInAt || todayRecord?.promptShownAt) {
+    if (todayRecord?.checkInAt) {
+      return;
+    }
+
+    if (await isCheckInPromptSnoozed(tab.id, now)) {
       return;
     }
 
@@ -480,6 +511,28 @@ namespace NoticeCheckInBackground {
     };
   }
 
+  async function snoozeDailyCheckInPrompt(sender: chrome.runtime.MessageSender): Promise<NoticeSnoozeDailyCheckInPromptResponse> {
+    const tabId: number | undefined = sender.tab?.id;
+
+    if (typeof tabId !== 'number') {
+      return {
+        success: false,
+        error: 'Unable to identify the current tab.',
+      };
+    }
+
+    const snoozedUntil: number = Date.now() + CHECK_IN_PROMPT_SNOOZE_MS;
+    const snoozedTabs: Record<string, number> = await getSnoozedCheckInPromptTabs();
+
+    snoozedTabs[String(tabId)] = snoozedUntil;
+    await saveSnoozedCheckInPromptTabs(snoozedTabs);
+
+    return {
+      success: true,
+      snoozedUntil,
+    };
+  }
+
   function getPendingCheckoutReminder(state: NoticeStorageState, now: number): NoticeDailyRecord | null {
     const pendingRecords: NoticeDailyRecord[] = Object.values(state.records)
       .filter((record: NoticeDailyRecord): boolean => {
@@ -502,6 +555,36 @@ namespace NoticeCheckInBackground {
       });
 
     return activeRecords[0] ?? null;
+  }
+
+  async function isCheckInPromptSnoozed(tabId: number, now: number): Promise<boolean> {
+    const snoozedTabs: Record<string, number> = await getSnoozedCheckInPromptTabs();
+    const tabKey: string = String(tabId);
+    const snoozedUntil: number | undefined = snoozedTabs[tabKey];
+
+    if (typeof snoozedUntil !== 'number') {
+      return false;
+    }
+
+    if (snoozedUntil <= now) {
+      delete snoozedTabs[tabKey];
+      await saveSnoozedCheckInPromptTabs(snoozedTabs);
+      return false;
+    }
+
+    return true;
+  }
+
+  async function removeSnoozedCheckInPromptTab(tabId: number): Promise<void> {
+    const snoozedTabs: Record<string, number> = await getSnoozedCheckInPromptTabs();
+    const tabKey: string = String(tabId);
+
+    if (typeof snoozedTabs[tabKey] !== 'number') {
+      return;
+    }
+
+    delete snoozedTabs[tabKey];
+    await saveSnoozedCheckInPromptTabs(snoozedTabs);
   }
 
   function getTodayStatus(state: NoticeStorageState, now: number): NoticeTodayStatus {
@@ -795,6 +878,10 @@ function withExtensionCredit(message: string): string {
     return isRecord(message) && message.type === 'CLEAR_TODAY_DATA';
   }
 
+  function isSnoozeDailyCheckInPromptMessage(message: unknown): message is NoticeSnoozeDailyCheckInPromptMessage {
+    return isRecord(message) && message.type === 'SNOOZE_DAILY_CHECKIN_PROMPT';
+  }
+
   function isAcknowledgeCheckoutReminderMessage(message: unknown): message is NoticeAcknowledgeCheckoutReminderMessage {
     return isRecord(message) && message.type === 'ACKNOWLEDGE_CHECKOUT_REMINDER' && typeof message.dayKey === 'string';
   }
@@ -822,6 +909,38 @@ function withExtensionCredit(message: string): string {
       chrome.storage.local.set(
         {
           [STORAGE_KEY]: state,
+        },
+        (): void => {
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+
+          resolve();
+        }
+      );
+    });
+  }
+
+  async function getSnoozedCheckInPromptTabs(): Promise<Record<string, number>> {
+    return new Promise((resolve: (value: Record<string, number>) => void): void => {
+      chrome.storage.session.get(CHECK_IN_PROMPT_SNOOZE_STORAGE_KEY, (items: Record<string, unknown>): void => {
+        if (chrome.runtime.lastError) {
+          console.error('Failed to read check-in prompt snooze state', chrome.runtime.lastError);
+          resolve({});
+          return;
+        }
+
+        resolve(normalizeSnoozedCheckInPromptTabs(items[CHECK_IN_PROMPT_SNOOZE_STORAGE_KEY]));
+      });
+    });
+  }
+
+  async function saveSnoozedCheckInPromptTabs(snoozedTabs: Record<string, number>): Promise<void> {
+    return new Promise((resolve: () => void, reject: (reason?: unknown) => void): void => {
+      chrome.storage.session.set(
+        {
+          [CHECK_IN_PROMPT_SNOOZE_STORAGE_KEY]: snoozedTabs,
         },
         (): void => {
           if (chrome.runtime.lastError) {
@@ -932,6 +1051,22 @@ function withExtensionCredit(message: string): string {
     }
 
     return DEFAULT_SETTINGS.latestCheckInTime;
+  }
+
+  function normalizeSnoozedCheckInPromptTabs(candidate: unknown): Record<string, number> {
+    if (!isRecord(candidate)) {
+      return {};
+    }
+
+    const snoozedTabs: Record<string, number> = {};
+
+    Object.entries(candidate).forEach(([tabKey, snoozedUntil]: [string, unknown]): void => {
+      if (/^\d+$/.test(tabKey) && typeof snoozedUntil === 'number' && Number.isFinite(snoozedUntil)) {
+        snoozedTabs[tabKey] = snoozedUntil;
+      }
+    });
+
+    return snoozedTabs;
   }
 
   function isTimeInput(candidate: unknown): candidate is string {

@@ -68,6 +68,10 @@ interface NoticeClearTodayDataMessage {
   type: "CLEAR_TODAY_DATA";
 }
 
+interface NoticeSnoozeDailyCheckInPromptMessage {
+  type: "SNOOZE_DAILY_CHECKIN_PROMPT";
+}
+
 interface NoticeAcknowledgeCheckoutReminderResponse {
   success: boolean;
   error?: string;
@@ -89,6 +93,12 @@ interface NoticeUpdateTodayCheckInResponse {
 interface NoticeClearTodayDataResponse {
   success: boolean;
   today?: NoticeTodayStatus;
+  error?: string;
+}
+
+interface NoticeSnoozeDailyCheckInPromptResponse {
+  success: boolean;
+  snoozedUntil?: number;
   error?: string;
 }
 

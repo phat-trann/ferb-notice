@@ -42,7 +42,7 @@ This file documents the runtime data model for FerbNotice so another AI agent ca
 - `settings.roundingSlotMinutes`: checkout due time rounding slot.
 - `records`: map indexed by the local day key in `YYYY-MM-DD` format.
 - `dayKey`: local calendar day derived from the machine system clock.
-- `promptShownAt`: timestamp when the daily check-in prompt rendered successfully.
+- `promptShownAt`: timestamp when the daily check-in prompt most recently rendered successfully. This is audit metadata and does not block future prompts by itself.
 - `checkInAt`: timestamp recorded when the user confirms check-in, or the manually corrected local check-in time from the setup popup.
 - `checkoutReminderDueAt`: due timestamp for the checkout reminder, calculated from `checkInAt + settings.workDurationMinutes` and then rounded up by `settings.roundingSlotMinutes`.
 - `checkoutReminderShownAt`: timestamp when the checkout reminder rendered successfully.
@@ -57,6 +57,7 @@ This file documents the runtime data model for FerbNotice so another AI agent ca
 - `UPDATE_SETTINGS`: setup popup -> background, saves setup settings.
 - `UPDATE_TODAY_CHECKIN`: setup popup -> background, overwrites today's `checkInAt`, recalculates `checkoutReminderDueAt`, resets the checkout reminder delivery marker when the due time changes, and refreshes the action badge/alarm.
 - `CLEAR_TODAY_DATA`: setup popup -> background, deletes today's record, clears today's checkout alarm, and refreshes the action badge.
+- `SNOOZE_DAILY_CHECKIN_PROMPT`: content -> background, snoozes the daily check-in prompt for the sender tab for one hour.
 
 ## Implementation Pointers
 
@@ -92,16 +93,19 @@ The setup popup receives a derived `today` object from `GET_SETTINGS`, `UPDATE_S
   - `IN?` with red badge when there is no active check-in for the current day.
   - countdown text such as `8h` or `42m` with amber badge while the 9-hour work window is still running.
   - `OUT` with green badge when today's record has already completed the 9-hour work duration.
+- Check-in prompt snooze is tab-scoped session state stored under `noticeCheckInPromptSnoozedTabs` in `chrome.storage.session`. It is intentionally not stored in `chrome.storage.local`.
 
 ## Daily Lifecycle
 
 1. The user activates the first injectable Chrome tab of the day.
 2. The background service worker injects the content script and shows the daily check-in prompt.
-3. The daily check-in prompt shows the current local time as an editable check-in time. If the user does not edit it, the background uses the actual click timestamp. If the user edits it, the content script sends the manual `HH:mm` value through `COMPLETE_CHECKIN`.
-4. When the user confirms the check-in prompt, the background saves `checkInAt` and schedules a `chrome.alarms` reminder.
-5. If the saved check-in time is still wrong, the user can open the extension action popup and edit today's check-in time. The background updates today's record and recomputes the checkout reminder.
-6. After the configured work duration, the result is rounded up to the configured slot, then the background tries to show the checkout reminder on the currently active tab.
-7. If the alarm fires while the active tab cannot receive the injected UI, the reminder stays pending until the next eligible tab activation.
+3. If the current tab is snoozed because the user previously clicked the secondary button, close button, or backdrop on the check-in prompt, the background skips that tab until the one-hour snooze expires.
+4. Before rendering a new FerbNotice modal, the content script removes any existing FerbNotice modal in the current tab.
+5. The daily check-in prompt shows the current local time as an editable check-in time. If the user does not edit it, the background uses the actual click timestamp. If the user edits it, the content script sends the manual `HH:mm` value through `COMPLETE_CHECKIN`.
+6. When the user confirms the check-in prompt, the background saves `checkInAt` and schedules a `chrome.alarms` reminder.
+7. If the saved check-in time is still wrong, the user can open the extension action popup and edit today's check-in time. The background updates today's record and recomputes the checkout reminder.
+8. After the configured work duration, the result is rounded up to the configured slot, then the background tries to show the checkout reminder on the currently active tab.
+9. If the alarm fires while the active tab cannot receive the injected UI, the reminder stays pending until the next eligible tab activation.
 
 ## Assumptions
 

@@ -125,7 +125,9 @@ GitHub Pages will serve `docs/index.html` as the site entry point. The AI data c
 ## Behavior
 
 - The first eligible tab activation each local day triggers the check-in reminder modal.
+- Before a new FerbNotice modal opens, the content script removes any existing FerbNotice modal in the current tab.
 - The daily check-in modal includes an editable check-in time. If the user does not edit it, the extension stores the current click timestamp in `chrome.storage.local`; if the user edits it, the extension stores the manual local time.
+- If the user clicks the secondary button, close button, or backdrop on the check-in modal, FerbNotice snoozes that tab for one hour before showing the check-in prompt again.
 - If Chrome or the computer opens late and the stored check-in time is wrong, the user can correct today's check-in time in the setup popup.
 - When today's check-in time is corrected, FerbNotice recomputes the checkout due time, alarm, and action badge.
 - The setup popup can clear today's stored data, which resets today's check-in state and clears today's checkout alarm.
