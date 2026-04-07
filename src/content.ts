@@ -420,7 +420,7 @@ function getStyles(): string {
 
     .notice-title {
       margin: 0 0 10px;
-      font-size: clamp(28px, 4vw, 34px);
+      font-size: clamp(25px, 4vw, 34px);
       line-height: 1.02;
       letter-spacing: -0.04em;
       max-width: 280px;
